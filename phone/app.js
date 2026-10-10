@@ -26,6 +26,7 @@ class EchoBandApp {
     this.initOperatorButtons();
     this.initAudioEngine();
     this.initASRWorker();
+    this.initSpeechSimulators();
     this.initServiceWorker();
   }
 
@@ -134,11 +135,41 @@ class EchoBandApp {
     }
   }
 
-  // --- 3. Audio & Microphone Engine ---
+  // --- 3. Audio & Speech Engine (Native Web Speech + Whisper Fallback) ---
   initAudioEngine() {
+    this.nativeRecognizer = null;
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (SpeechRec) {
+      this.nativeRecognizer = new SpeechRec();
+      this.nativeRecognizer.continuous = false;
+      this.nativeRecognizer.interimResults = false;
+
+      this.nativeRecognizer.onstart = () => {
+        this.elBtnListen.textContent = 'Stop Mic';
+        this.elBtnListen.classList.add('listening');
+        this.ui.setAsrStatus('Listening (Native Speech)...');
+      };
+
+      this.nativeRecognizer.onresult = (event) => {
+        const text = event.results[0][0].transcript;
+        console.log('[Native Speech] Result:', text);
+        this.handleTranscript(text);
+      };
+
+      this.nativeRecognizer.onerror = (event) => {
+        console.warn('[Native Speech] Error:', event.error);
+        this.ui.setAsrStatus(`Mic error: ${event.error}`);
+        this.stopListeningUI();
+      };
+
+      this.nativeRecognizer.onend = () => {
+        this.stopListeningUI();
+      };
+    }
+
     this.audioEngine = new AudioEngine({
       onLevelUpdate: (rms) => {
-        // Visual loudness meter
         const pct = Math.min(100, Math.round(rms * 400));
         if (this.elAudioLevelBar) {
           this.elAudioLevelBar.style.width = `${pct}%`;
@@ -148,16 +179,13 @@ class EchoBandApp {
         if (state === 'listening') {
           this.elBtnListen.textContent = 'Stop Mic';
           this.elBtnListen.classList.add('listening');
-          this.ui.setAsrStatus('Listening for speech...');
+          this.ui.setAsrStatus('Listening for speech (Whisper Gate)...');
         } else if (state === 'recording') {
           this.ui.setAsrStatus('Speech detected! Recording...');
         } else if (state === 'processing') {
           this.ui.setAsrStatus('Processing audio clip...');
         } else {
-          this.elBtnListen.textContent = 'Listen Mic';
-          this.elBtnListen.classList.remove('listening');
-          this.ui.setAsrStatus('Standby');
-          if (this.elAudioLevelBar) this.elAudioLevelBar.style.width = '0%';
+          this.stopListeningUI();
         }
       },
       onAudioReady: (audioPCM, sampleRate) => {
@@ -166,16 +194,38 @@ class EchoBandApp {
     });
 
     this.elBtnListen.addEventListener('click', async () => {
-      if (!this.audioEngine.isListening) {
+      const engine = document.getElementById('asrEngine')?.value || 'native';
+
+      if (this.elBtnListen.classList.contains('listening')) {
+        if (this.nativeRecognizer) this.nativeRecognizer.stop();
+        if (this.audioEngine) this.audioEngine.stopListening();
+        this.stopListeningUI();
+        return;
+      }
+
+      if (engine === 'native' && this.nativeRecognizer) {
+        const langMap = { en: 'en-IN', ml: 'ml-IN', hi: 'hi-IN', auto: 'en-IN' };
+        this.nativeRecognizer.lang = langMap[this.elAsrLangSelect.value] || 'en-IN';
+        try {
+          this.nativeRecognizer.start();
+        } catch (err) {
+          console.warn('[Native Speech] Start failed:', err);
+        }
+      } else {
         try {
           await this.audioEngine.startListening();
         } catch (err) {
           alert(`Microphone access error: ${err.message}`);
         }
-      } else {
-        this.audioEngine.stopListening();
       }
     });
+  }
+
+  stopListeningUI() {
+    this.elBtnListen.textContent = 'Listen Mic';
+    this.elBtnListen.classList.remove('listening');
+    this.ui.setAsrStatus('Standby');
+    if (this.elAudioLevelBar) this.elAudioLevelBar.style.width = '0%';
   }
 
   // --- 4. Whisper Speech Recognition Worker ---
@@ -208,7 +258,7 @@ class EchoBandApp {
       });
     } catch (err) {
       console.warn('[App] Web Worker initialization error:', err);
-      this.ui.setAsrStatus('ASR Worker unavailable (Use Operator Buttons)');
+      this.ui.setAsrStatus('ASR Worker unavailable (Use Native Speech or Operator Buttons)');
     }
   }
 
@@ -220,6 +270,36 @@ class EchoBandApp {
       language: this.elAsrLangSelect.value,
       sampleRate: sampleRate
     });
+  }
+
+  // --- 5. Quick Speech Simulators & Judges Demo Helper ---
+  initSpeechSimulators() {
+    // Quick phrase chips
+    const chips = document.querySelectorAll('.btn-chip');
+    chips.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const phrase = chip.getAttribute('data-phrase');
+        if (phrase) this.handleTranscript(phrase);
+      });
+    });
+
+    // Manual input test
+    const input = document.getElementById('manualSpeechInput');
+    const parseBtn = document.getElementById('btnSimulateSpeech');
+    if (parseBtn && input) {
+      parseBtn.addEventListener('click', () => {
+        const text = input.value.trim();
+        if (text) {
+          this.handleTranscript(text);
+          input.value = '';
+        }
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          parseBtn.click();
+        }
+      });
+    }
   }
 
   handleTranscript(text) {
@@ -234,7 +314,7 @@ class EchoBandApp {
     }
   }
 
-  // --- 5. Service Worker Offline Support ---
+  // --- 6. Service Worker Offline Support ---
   initServiceWorker() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js')

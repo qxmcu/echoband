@@ -264,6 +264,21 @@
       font-style: italic;
     }
 
+    .btn-chip {
+      background: #1e293b;
+      border: 1px solid #475569;
+      color: #38bdf8;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .btn-chip:hover {
+      background: #334155;
+      border-color: #38bdf8;
+    }
+
     .raw-stream {
       font-family: monospace;
       font-size: 0.72rem;
@@ -400,7 +415,7 @@
     <!-- Speech Recognition Panel (Secondary Bonus) -->
     <section class="audio-panel">
       <div class="section-title">
-        <span>Speech Recognition (Whisper Base)</span>
+        <span>Speech Recognition</span>
         <span id="asrStatus" style="font-size:0.75rem; text-transform:none; color:#38bdf8;">Standby</span>
       </div>
       <div id="asrProgressWrap" class="progress-bar-wrap">
@@ -409,17 +424,37 @@
       <div class="audio-bar-wrap">
         <div id="audioLevelBar" class="audio-bar"></div>
       </div>
-      <div class="audio-btns">
+      <div class="audio-btns" style="margin-bottom: 8px;">
+        <select id="asrEngine" style="flex:1;">
+          <option value="native" selected>Native Chrome Speech (Instant 0MB)</option>
+          <option value="whisper">Whisper Base (WebGPU / WASM)</option>
+        </select>
         <select id="asrLanguage" style="flex:1;">
-          <option value="auto">Language: Auto</option>
-          <option value="en">English</option>
+          <option value="en">English (en-IN)</option>
           <option value="ml">Malayalam (മലയാളം)</option>
           <option value="hi">Hindi (हिन्दी)</option>
+          <option value="auto">Auto Detect</option>
         </select>
         <button id="btnListen" class="btn-listen">Listen Mic</button>
       </div>
       <div id="transcriptText" class="transcript-box">
-        Tap "Listen Mic" or trigger manual alert buttons above.
+        Tap "Listen Mic" or test with sample phrases below.
+      </div>
+
+      <!-- Quick Test Phrases (Zero-latency demo mode for judges) -->
+      <div style="margin-top: 10px;">
+        <div style="font-size: 0.75rem; color: var(--text-sub); margin-bottom: 4px;">Quick Test Phrases (Click to simulate speech):</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
+          <button class="btn-chip" data-phrase="The train to Ernakulam will depart from platform two">Platform 2 (EN)</button>
+          <button class="btn-chip" data-phrase="Train 12625 is delayed by fifteen minutes">Delayed (EN)</button>
+          <button class="btn-chip" data-phrase="അടിയന്തര അറിയിപ്പ്: ശ്രദ്ധിക്കുക">അടിയന്തര (Urgent ML)</button>
+          <button class="btn-chip" data-phrase="ട്രെയിൻ റദ്ദാക്കി">റദ്ദാക്കി (Cancel ML)</button>
+          <button class="btn-chip" data-phrase="तत्काल सूचना: कृपया ध्यान दें">तत्काल (Urgent HI)</button>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <input type="text" id="manualSpeechInput" placeholder="Or type any announcement..." style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid #475569; background:#0f172a; color:#fff; font-size:0.85rem;">
+          <button id="btnSimulateSpeech" style="background:#0284c7; border:none; padding:8px 12px; border-radius:8px; font-weight:700;">Parse</button>
+        </div>
       </div>
     </section>
 
