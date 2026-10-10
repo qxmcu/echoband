@@ -218,7 +218,38 @@ void buildPattern(uint8_t type, uint8_t arg) {
   isAlertPlaying = true;
 }
 
-// --- BLE Callbacks ---
+// --- BLE Callbacks (Compatible with both NimBLE 1.x and modern NimBLE 2.x) ---
+#if defined(NIMBLE_CPP_VERSION_MAJOR) && (NIMBLE_CPP_VERSION_MAJOR >= 2) || defined(NIMBLE_VERSION_MAJOR) && (NIMBLE_VERSION_MAJOR >= 2) || __has_include(<NimBLEConnInfo.h>)
+// NimBLE-Arduino v2.x (Modern API)
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+    bleConnected = true;
+    Serial.println("[BLE] Phone connected to EchoBand!");
+    char buf[32];
+    snprintf(buf, sizeof(buf), "PROFILE %s", getProfileName(currentProfile));
+    notifyStatus(buf);
+  }
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+    bleConnected = false;
+    Serial.println("[BLE] Phone disconnected -> Waiting for reconnect");
+    NimBLEDevice::startAdvertising();
+  }
+};
+
+class CommandCallback : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
+    auto val = pChar->getValue();
+    if (val.length() >= 3) {
+      uint8_t type  = (uint8_t)val[0];
+      uint8_t arg   = (uint8_t)val[1];
+      uint8_t msgId = (uint8_t)val[2];
+      Serial.printf("[BLE RX] Command: type=%u, arg=%u, msgId=%u\n", type, arg, msgId);
+      processCommand(type, arg, msgId);
+    }
+  }
+};
+#else
+// NimBLE-Arduino v1.x (Legacy API)
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* pServer) override {
     bleConnected = true;
@@ -236,7 +267,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
 class CommandCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* pChar) override {
-    std::string val = pChar->getValue();
+    auto val = pChar->getValue();
     if (val.length() >= 3) {
       uint8_t type  = (uint8_t)val[0];
       uint8_t arg   = (uint8_t)val[1];
@@ -246,6 +277,7 @@ class CommandCallback : public NimBLECharacteristicCallbacks {
     }
   }
 };
+#endif
 
 // --- Setup ---
 void setup() {
