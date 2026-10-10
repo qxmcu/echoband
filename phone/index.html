@@ -230,8 +230,8 @@
 
     .timeline-track {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 6px;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
       position: relative;
     }
     .tl-node {
@@ -511,26 +511,20 @@
       </div>
     </section>
 
-    <!-- Sensory Confirmation Loop Timeline -->
+    <!-- Delivery Status -->
     <section class="timeline-card">
       <div class="timeline-header">
-        <span class="timeline-title">Sensory Confirmation Loop</span>
+        <span class="timeline-title">Delivery Status</span>
         <div class="status-dot-wrap">
           <span id="connDot" class="status-dot"></span>
           <span id="connBadge">Standby</span>
         </div>
       </div>
       <div class="timeline-track">
-        <div id="tlSent" class="tl-node">1. SENT</div>
-        <div id="tlRx"   class="tl-node">2. DELIVERED</div>
-        <div id="tlAck"  class="tl-node">3. DOUBLE-TAP ACK</div>
+        <div id="tlSent" class="tl-node">1. PHONE TRANSMIT</div>
+        <div id="tlRx"   class="tl-node">2. BAND DELIVERED</div>
       </div>
       <div id="tlStatusMsg" class="tl-feedback">Ready to broadcast alert</div>
-      <div style="text-align: center; margin-top: 8px;">
-        <button id="btnManualAckFallback" style="background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; padding: 6px 14px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; cursor: pointer; display: none;">
-          ⚡ Dismiss / Confirm on Phone (Double-Tap Fallback)
-        </button>
-      </div>
     </section>
 
     <!-- Wearer Sense Profile -->

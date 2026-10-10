@@ -23,7 +23,6 @@ export class UIManager {
     // Timeline elements
     this.elTimelineSent   = document.getElementById('tlSent');
     this.elTimelineRx     = document.getElementById('tlRx');
-    this.elTimelineAck    = document.getElementById('tlAck');
     this.elTimelineMsg    = document.getElementById('tlStatusMsg');
 
     // Profile & Transcript
@@ -32,10 +31,8 @@ export class UIManager {
     this.elAsrStatus      = document.getElementById('asrStatus');
     this.elAsrProgress    = document.getElementById('asrProgressBar');
     this.elAsrProgressWrap= document.getElementById('asrProgressWrap');
-    this.elBtnManualAck   = document.getElementById('btnManualAckFallback');
 
     this.currentProfile = 'deaf';
-    this.ackTimer = null;
     this.initProfileListener();
   }
 
@@ -145,48 +142,38 @@ export class UIManager {
       this.elAlertBadge.className = 'badge-pill badge-standby';
     }
     if (this.elAlertCard) this.elAlertCard.classList.remove('urgent-mode');
-    if (this.elBtnManualAck) this.elBtnManualAck.style.display = 'none';
-  }
-
-  // --- Alert Timeline Flow (SENT -> DELIVERED -> ACKNOWLEDGED / NOT CONFIRMED) ---
-  startTimeline() {
-    if (this.ackTimer) clearTimeout(this.ackTimer);
-
-    if (this.elTimelineSent) this.elTimelineSent.className = 'tl-node active';
+    if (this.elTimelineSent) this.elTimelineSent.className = 'tl-node';
     if (this.elTimelineRx)   this.elTimelineRx.className   = 'tl-node';
-    if (this.elTimelineAck)  this.elTimelineAck.className  = 'tl-node';
-    if (this.elBtnManualAck) this.elBtnManualAck.style.display = 'inline-block';
     if (this.elTimelineMsg) {
-      this.elTimelineMsg.textContent = 'Broadcasting signal to EchoBand...';
+      this.elTimelineMsg.textContent = 'Ready to broadcast alert';
       this.elTimelineMsg.style.color = '#94a3b8';
     }
-
-    // 15s unconfirmed countdown
-    this.ackTimer = setTimeout(() => {
-      if (this.elTimelineAck && !this.elTimelineAck.classList.contains('success')) {
-        this.elTimelineAck.className = 'tl-node failed';
-        if (this.elTimelineMsg) {
-          this.elTimelineMsg.textContent = '⚠️ NOT CONFIRMED after 15 s (Wearer has not double-tapped)';
-          this.elTimelineMsg.style.color = '#f87171';
-        }
-      }
-    }, 15000);
   }
 
-  markReceived(msgId) {
-    if (this.elTimelineRx)  this.elTimelineRx.className = 'tl-node active';
+  // --- Alert Delivery Flow (PHONE TRANSMIT -> BAND DELIVERED) ---
+  startTimeline() {
+    if (this.elTimelineSent) this.elTimelineSent.className = 'tl-node active';
+    if (this.elTimelineRx)   this.elTimelineRx.className   = 'tl-node';
     if (this.elTimelineMsg) {
-      this.elTimelineMsg.textContent = `EchoBand playing sensory wave (Msg #${msgId})...`;
+      this.elTimelineMsg.textContent = 'Transmitting signal to EchoBand...';
       this.elTimelineMsg.style.color = '#38bdf8';
     }
   }
 
-  markAcknowledged(msgId) {
-    if (this.ackTimer) clearTimeout(this.ackTimer);
-    if (this.elTimelineAck) this.elTimelineAck.className = 'tl-node success';
-    if (this.elBtnManualAck) this.elBtnManualAck.style.display = 'none';
+  markReceived(msgId) {
+    if (this.elTimelineSent) this.elTimelineSent.className = 'tl-node';
+    if (this.elTimelineRx)   this.elTimelineRx.className   = 'tl-node success';
     if (this.elTimelineMsg) {
-      this.elTimelineMsg.textContent = `✅ ACKNOWLEDGED: Double-tap confirmed on wrist (Msg #${msgId})!`;
+      this.elTimelineMsg.textContent = `✅ DELIVERED: EchoBand playing sensory wave (Msg #${msgId})`;
+      this.elTimelineMsg.style.color = '#4ade80';
+    }
+  }
+
+  markAcknowledged(msgId) {
+    if (this.elTimelineSent) this.elTimelineSent.className = 'tl-node';
+    if (this.elTimelineRx)   this.elTimelineRx.className   = 'tl-node success';
+    if (this.elTimelineMsg) {
+      this.elTimelineMsg.textContent = `✅ DELIVERED: EchoBand playing sensory wave (Msg #${msgId})`;
       this.elTimelineMsg.style.color = '#4ade80';
     }
   }
