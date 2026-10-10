@@ -277,7 +277,8 @@ class CommandCallback : public NimBLECharacteristicCallbacks {
     }
   }
 };
-#endif
+// Active MPU6050 I2C address (0x68 if AD0->GND, 0x69 if AD0->VCC/floating)
+uint8_t mpuActiveAddr = MPU6050_ADDR;
 
 // --- Setup ---
 void setup() {
@@ -287,60 +288,10 @@ void setup() {
   Serial.println("  EchoBand — Wearable Haptic Band ");
   Serial.println("==================================");
 
-  // Pin initialization
-  pinMode(PIN_BTN_PROFILE, INPUT_PULLUP);
-  pinMode(PIN_BUZZER, OUTPUT);
-  pinMode(PIN_LED_BLUE, OUTPUT);
-  pinMode(PIN_LED_ORANGE, OUTPUT);
-  pinMode(PIN_LED_GREEN, OUTPUT);
-  pinMode(PIN_LED_RED, OUTPUT);
-  pinMode(PIN_LED_ONBOARD, OUTPUT);
+  // 1. Reset Bluetooth controller state if left dirty from previous reboot/crash
+  btStop();
 
-  digitalWrite(PIN_BUZZER, LOW);
-  digitalWrite(PIN_LED_BLUE, LOW);
-  digitalWrite(PIN_LED_ORANGE, LOW);
-  digitalWrite(PIN_LED_GREEN, LOW);
-  digitalWrite(PIN_LED_RED, LOW);
-  digitalWrite(PIN_LED_ONBOARD, LOW);
-
-  // Load saved profile
-  prefs.begin("echoband", false);
-  currentProfile = prefs.getUChar("profile", PROFILE_DEAF);
-  if (currentProfile >= PROFILE_COUNT) currentProfile = PROFILE_DEAF;
-  prefs.end();
-  Serial.printf("[INIT] Active Profile: %s (%u)\n", getProfileName(currentProfile), currentProfile);
-
-  // Allocate PWM timers & attach servos
-  ESP32PWM::allocateTimer(0);
-  ESP32PWM::allocateTimer(1);
-  ESP32PWM::allocateTimer(2);
-  ESP32PWM::allocateTimer(3);
-
-  servoM1.setPeriodHertz(50);
-  servoM2.setPeriodHertz(50);
-  servoM3.setPeriodHertz(50);
-  servoM4.setPeriodHertz(50);
-
-  servoM1.attach(PIN_SERVO_M1, 500, 2400);
-  servoM2.attach(PIN_SERVO_M2, 500, 2400);
-  servoM3.attach(PIN_SERVO_M3, 500, 2400);
-  servoM4.attach(PIN_SERVO_M4, 500, 2400);
-
-  for (int i = 0; i < 4; i++) {
-    servos[i]->write(SERVO_REST_ANGLE);
-  }
-
-  // Initialize MPU6050
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
-  mpuHealthy = initMPU6050();
-  if (mpuHealthy) {
-    Serial.println("[OK] MPU6050 Accelerometer initialized (+/- 8g)");
-  } else {
-    Serial.println("[WARN] MPU6050 not detected at 0x68!");
-    Serial.println("  ==> Fallback enabled: Press Profile Button (GPIO 4) to ACK alerts.");
-  }
-
-  // Initialize NimBLE peripheral as "EchoBand"
+  // 2. Initialize NimBLE peripheral FIRST (before touching any hardware timers)
   NimBLEDevice::init("EchoBand");
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);
   pServer = NimBLEDevice::createServer();
@@ -369,6 +320,58 @@ void setup() {
   pAdv->setName("EchoBand");
   pAdv->start();
   Serial.println("[OK] BLE Advertising as 'EchoBand'");
+
+  // 3. Pin initialization
+  pinMode(PIN_BTN_PROFILE, INPUT_PULLUP);
+  pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(PIN_LED_BLUE, OUTPUT);
+  pinMode(PIN_LED_ORANGE, OUTPUT);
+  pinMode(PIN_LED_GREEN, OUTPUT);
+  pinMode(PIN_LED_RED, OUTPUT);
+  pinMode(PIN_LED_ONBOARD, OUTPUT);
+
+  digitalWrite(PIN_BUZZER, LOW);
+  digitalWrite(PIN_LED_BLUE, LOW);
+  digitalWrite(PIN_LED_ORANGE, LOW);
+  digitalWrite(PIN_LED_GREEN, LOW);
+  digitalWrite(PIN_LED_RED, LOW);
+  digitalWrite(PIN_LED_ONBOARD, LOW);
+
+  // 4. Load saved profile
+  prefs.begin("echoband", false);
+  currentProfile = prefs.getUChar("profile", PROFILE_DEAF);
+  if (currentProfile >= PROFILE_COUNT) currentProfile = PROFILE_DEAF;
+  prefs.end();
+  Serial.printf("[INIT] Active Profile: %s (%u)\n", getProfileName(currentProfile), currentProfile);
+
+  // 5. Servo allocation: DO NOT hijack timers 0 & 1 (reserved for BT/system).
+  // Only allocate Timers 2 and 3 for servo PWM.
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+
+  servoM1.setPeriodHertz(50);
+  servoM2.setPeriodHertz(50);
+  servoM3.setPeriodHertz(50);
+  servoM4.setPeriodHertz(50);
+
+  servoM1.attach(PIN_SERVO_M1, 500, 2400);
+  servoM2.attach(PIN_SERVO_M2, 500, 2400);
+  servoM3.attach(PIN_SERVO_M3, 500, 2400);
+  servoM4.attach(PIN_SERVO_M4, 500, 2400);
+
+  for (int i = 0; i < 4; i++) {
+    servos[i]->write(SERVO_REST_ANGLE);
+  }
+
+  // 6. Initialize MPU6050 (Auto-detects 0x68 and 0x69)
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
+  mpuHealthy = initMPU6050();
+  if (mpuHealthy) {
+    Serial.printf("[OK] MPU6050 Accelerometer initialized at 0x%02X (+/- 8g)\n", mpuActiveAddr);
+  } else {
+    Serial.println("[WARN] MPU6050 not detected at 0x68 or 0x69!");
+    Serial.println("  ==> Fallback enabled: Press Profile Button (GPIO 4) to ACK alerts.");
+  }
 
   systemHealthy = mpuHealthy && bleHealthy;
   Serial.printf("[DIAGNOSTICS] Health: %s (MPU=%s, BLE=%s)\n",
@@ -582,31 +585,38 @@ void processCommand(uint8_t type, uint8_t arg, uint8_t msgId) {
 
 // --- MPU6050 Raw I2C Implementation ---
 bool initMPU6050() {
-  Wire.beginTransmission(MPU6050_ADDR);
-  if (Wire.endTransmission() != 0) return false;
+  uint8_t probeAddrs[] = {0x68, 0x69};
+  for (uint8_t addr : probeAddrs) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      mpuActiveAddr = addr;
+      // Wake up sensor (PWR_MGMT_1 = 0)
+      Wire.beginTransmission(mpuActiveAddr);
+      Wire.write(0x6B);
+      Wire.write(0x00);
+      if (Wire.endTransmission() != 0) continue;
 
-  Wire.beginTransmission(MPU6050_ADDR);
-  Wire.write(0x6B);
-  Wire.write(0x00);
-  if (Wire.endTransmission() != 0) return false;
+      // Set range to +/- 8g (ACCEL_CONFIG = 0x10)
+      Wire.beginTransmission(mpuActiveAddr);
+      Wire.write(0x1C);
+      Wire.write(0x10);
+      if (Wire.endTransmission() != 0) continue;
 
-  Wire.beginTransmission(MPU6050_ADDR);
-  Wire.write(0x1C);
-  Wire.write(0x10); // +/- 8g
-  if (Wire.endTransmission() != 0) return false;
-
-  return true;
+      return true;
+    }
+  }
+  return false;
 }
 
 void checkMPU6050() {
-  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.beginTransmission(mpuActiveAddr);
   Wire.write(0x3B);
   if (Wire.endTransmission(false) != 0) {
     mpuHealthy = false;
     return;
   }
 
-  if (Wire.requestFrom((uint8_t)MPU6050_ADDR, (uint8_t)6) != 6) {
+  if (Wire.requestFrom((uint8_t)mpuActiveAddr, (uint8_t)6) != 6) {
     mpuHealthy = false;
     return;
   }
