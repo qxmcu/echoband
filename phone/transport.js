@@ -227,11 +227,11 @@ export class MockTransport extends BaseTransport {
     // 1. Instantly simulate Band reception
     this.notifyStatus(`RX ${msgId}`);
 
-    // 2. After 3.5s (wearer feels wave & double-taps), simulate Double-Tap ACK
+    // 2. After 3.5s (sensory wave completes)
     if (this.mockAckTimer) clearTimeout(this.mockAckTimer);
     this.mockAckTimer = setTimeout(() => {
       if (this.connected) {
-        console.log(`[Mock] Double-tap detected on wrist!`);
+        console.log(`[Mock] Alert pattern completed.`);
         this.notifyStatus(`ACK ${msgId}`);
       }
     }, 3500);

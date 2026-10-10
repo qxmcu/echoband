@@ -368,11 +368,13 @@ class EchoBandApp {
     }
   }
 
-  // --- 6. Service Worker Offline Support ---
   initServiceWorker() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js')
-        .then((reg) => console.log('[SW] Service Worker registered:', reg.scope))
+        .then((reg) => {
+          reg.update();
+          console.log('[SW] Service Worker registered & updated:', reg.scope);
+        })
         .catch((err) => console.warn('[SW] Registration failed:', err));
     }
   }
