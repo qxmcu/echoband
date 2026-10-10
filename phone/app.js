@@ -1,0 +1,250 @@
+// app.js — Main Application Coordinator for EchoBand Phone Web App
+
+import { BleTransport, SerialTransport, MockTransport } from './transport.js';
+import { AudioEngine } from './audio.js';
+import { UIManager } from './ui.js';
+import { matchAnnouncement, ALERT_TYPES } from './match.js';
+
+class EchoBandApp {
+  constructor() {
+    this.ui = new UIManager();
+    this.transport = null;
+    this.audioEngine = null;
+    this.asrWorker = null;
+
+    this.selectedPlatform = 2; // Default Platform 2
+    this.isWorkerReady = false;
+
+    // DOM Bindings
+    this.elTransportSelect = document.getElementById('transportType');
+    this.elBtnConnect       = document.getElementById('btnConnect');
+    this.elBtnListen        = document.getElementById('btnListen');
+    this.elAsrLangSelect    = document.getElementById('asrLanguage');
+    this.elAudioLevelBar    = document.getElementById('audioLevelBar');
+
+    this.initTransport();
+    this.initOperatorButtons();
+    this.initAudioEngine();
+    this.initASRWorker();
+    this.initServiceWorker();
+  }
+
+  // --- 1. Transport Lifecycle ---
+  initTransport() {
+    this.setTransportInstance(this.elTransportSelect.value);
+
+    this.elTransportSelect.addEventListener('change', () => {
+      if (this.transport && this.transport.isConnected()) {
+        this.transport.disconnect();
+      }
+      this.setTransportInstance(this.elTransportSelect.value);
+      this.updateConnectButton(false);
+    });
+
+    this.elBtnConnect.addEventListener('click', async () => {
+      if (!this.transport.isConnected()) {
+        try {
+          this.elBtnConnect.disabled = true;
+          this.elBtnConnect.textContent = 'Connecting...';
+          await this.transport.connect();
+          this.updateConnectButton(true);
+        } catch (err) {
+          alert(`Connection failed: ${err.message}`);
+          this.updateConnectButton(false);
+        } finally {
+          this.elBtnConnect.disabled = false;
+        }
+      } else {
+        await this.transport.disconnect();
+        this.updateConnectButton(false);
+      }
+    });
+
+    // Auto-connect Mock on first load for instant testing!
+    if (this.elTransportSelect.value === 'mock') {
+      this.transport.connect().then(() => this.updateConnectButton(true)).catch(() => {});
+    }
+  }
+
+  setTransportInstance(type) {
+    if (type === 'ble') {
+      this.transport = new BleTransport();
+    } else if (type === 'serial') {
+      this.transport = new SerialTransport();
+    } else {
+      this.transport = new MockTransport();
+    }
+
+    this.transport.onStatus((line) => {
+      this.ui.updateStatusLine(line);
+    });
+  }
+
+  updateConnectButton(connected) {
+    if (connected) {
+      this.elBtnConnect.textContent = 'Disconnect';
+      this.elBtnConnect.className = 'btn-connected';
+    } else {
+      this.elBtnConnect.textContent = 'Connect';
+      this.elBtnConnect.className = 'btn-connect';
+    }
+  }
+
+  // --- 2. Operator Buttons (Primary Path) ---
+  initOperatorButtons() {
+    // Platform number selector (P1..P5)
+    const platBtns = document.querySelectorAll('.btn-pnum');
+    platBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        platBtns.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.selectedPlatform = parseInt(btn.getAttribute('data-plat'), 10) || 2;
+      });
+    });
+
+    // Alert buttons
+    document.getElementById('btnOpPlatform').addEventListener('click', () => {
+      this.triggerAlert(ALERT_TYPES.PLATFORM, this.selectedPlatform);
+    });
+    document.getElementById('btnOpDelay').addEventListener('click', () => {
+      this.triggerAlert(ALERT_TYPES.DELAY, 0);
+    });
+    document.getElementById('btnOpDeparture').addEventListener('click', () => {
+      this.triggerAlert(ALERT_TYPES.DEPARTURE, 0);
+    });
+    document.getElementById('btnOpUrgent').addEventListener('click', () => {
+      this.triggerAlert(ALERT_TYPES.URGENT, 0);
+    });
+    document.getElementById('btnOpCancelled').addEventListener('click', () => {
+      this.triggerAlert(ALERT_TYPES.CANCELLED, 0);
+    });
+  }
+
+  async triggerAlert(type, arg = 0, labels = null) {
+    this.ui.displayAlert(type, arg, labels);
+
+    if (this.transport && this.transport.isConnected()) {
+      try {
+        await this.transport.send(type, arg);
+      } catch (err) {
+        console.error('[App] Transport send error:', err);
+      }
+    } else {
+      console.warn('[App] Transport is not connected.');
+    }
+  }
+
+  // --- 3. Audio & Microphone Engine ---
+  initAudioEngine() {
+    this.audioEngine = new AudioEngine({
+      onLevelUpdate: (rms) => {
+        // Visual loudness meter
+        const pct = Math.min(100, Math.round(rms * 400));
+        if (this.elAudioLevelBar) {
+          this.elAudioLevelBar.style.width = `${pct}%`;
+        }
+      },
+      onStateChange: (state) => {
+        if (state === 'listening') {
+          this.elBtnListen.textContent = 'Stop Mic';
+          this.elBtnListen.classList.add('listening');
+          this.ui.setAsrStatus('Listening for speech...');
+        } else if (state === 'recording') {
+          this.ui.setAsrStatus('Speech detected! Recording...');
+        } else if (state === 'processing') {
+          this.ui.setAsrStatus('Processing audio clip...');
+        } else {
+          this.elBtnListen.textContent = 'Listen Mic';
+          this.elBtnListen.classList.remove('listening');
+          this.ui.setAsrStatus('Standby');
+          if (this.elAudioLevelBar) this.elAudioLevelBar.style.width = '0%';
+        }
+      },
+      onAudioReady: (audioPCM, sampleRate) => {
+        this.processSpeechClip(audioPCM, sampleRate);
+      }
+    });
+
+    this.elBtnListen.addEventListener('click', async () => {
+      if (!this.audioEngine.isListening) {
+        try {
+          await this.audioEngine.startListening();
+        } catch (err) {
+          alert(`Microphone access error: ${err.message}`);
+        }
+      } else {
+        this.audioEngine.stopListening();
+      }
+    });
+  }
+
+  // --- 4. Whisper Speech Recognition Worker ---
+  initASRWorker() {
+    try {
+      this.asrWorker = new Worker('./asr.worker.js', { type: 'module' });
+
+      this.asrWorker.onmessage = (e) => {
+        const data = e.data;
+        if (data.status === 'loading') {
+          this.ui.setAsrStatus(data.message);
+        } else if (data.status === 'progress') {
+          this.ui.setAsrStatus(`Downloading Whisper base: ${data.progress}%`, data.progress);
+        } else if (data.status === 'ready') {
+          this.isWorkerReady = true;
+          this.ui.setAsrStatus('Whisper Model Ready', 100);
+        } else if (data.status === 'transcribing') {
+          this.ui.setAsrStatus('Transcribing speech...');
+        } else if (data.status === 'result') {
+          this.handleTranscript(data.text);
+        } else if (data.status === 'error') {
+          this.ui.setAsrStatus(data.message);
+        }
+      };
+
+      // Trigger lazy worker init
+      this.asrWorker.postMessage({
+        type: 'init',
+        language: this.elAsrLangSelect.value
+      });
+    } catch (err) {
+      console.warn('[App] Web Worker initialization error:', err);
+      this.ui.setAsrStatus('ASR Worker unavailable (Use Operator Buttons)');
+    }
+  }
+
+  processSpeechClip(audioPCM, sampleRate) {
+    if (!this.asrWorker) return;
+    this.asrWorker.postMessage({
+      type: 'transcribe',
+      audio: audioPCM,
+      language: this.elAsrLangSelect.value,
+      sampleRate: sampleRate
+    });
+  }
+
+  handleTranscript(text) {
+    console.log('[App] Transcript:', text);
+    const match = matchAnnouncement(text);
+
+    if (match.matched) {
+      this.ui.setTranscript(`"${text}" -> [${match.typeName}]`, true);
+      this.triggerAlert(match.type, match.arg, match.labels);
+    } else {
+      this.ui.setTranscript(`"${text}"`, false);
+    }
+  }
+
+  // --- 5. Service Worker Offline Support ---
+  initServiceWorker() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js')
+        .then((reg) => console.log('[SW] Service Worker registered:', reg.scope))
+        .catch((err) => console.warn('[SW] Registration failed:', err));
+    }
+  }
+}
+
+// Instantiate on DOM ready
+window.addEventListener('DOMContentLoaded', () => {
+  window.echoApp = new EchoBandApp();
+});

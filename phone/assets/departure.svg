@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%">
+  <rect width="200" height="200" rx="24" fill="#16a34a" />
+  <!-- Train departing -->
+  <path d="M35 60 C35 50, 50 45, 75 45 L115 45 C125 45, 130 50, 130 60 L130 135 L35 135 Z" fill="#ffffff" />
+  <rect x="45" y="60" width="25" height="25" rx="3" fill="#15803d" />
+  <rect x="80" y="60" width="40" height="25" rx="3" fill="#15803d" />
+  <!-- Wheels -->
+  <circle cx="55" cy="142" r="10" fill="#334155" />
+  <circle cx="110" cy="142" r="10" fill="#334155" />
+  <!-- Big Forward Departure Arrow -->
+  <path d="M125 105 L155 105 L155 90 L185 118 L155 146 L155 131 L125 131 Z" fill="#facc15" stroke="#ffffff" stroke-width="3" />
+</svg>
