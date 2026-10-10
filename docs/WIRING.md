@@ -1,79 +1,63 @@
-# EchoBand — Complete Wiring and Pinout Reference
+# EchoBand — Complete Wiring and Pinout Reference (Single ESP32 Board)
 
-This document details all physical connections, power routing, and pin mappings for the EchoBand Station and Wearable Band units.
+This document details all physical connections, power routing, and pin mappings for the EchoBand Wearable Armband unit.
 
 ---
 
-## 1. Power Distribution
+## 1. Power Distribution Schematic
 
 ```
-[9V Battery]
-    │ (+) Red lead
-    ▼
-[L298N 12V Screw Terminal]
-    │
-[L298N Board] ── (Ensure 5V-EN Jumper cap is ON!)
-    │
-    ├─► [+5V Screw Terminal] ──► Breadboard Servo Power Rail (+5V)
-    │                                └─► ESP32 VIN (optional untethered)
-    │
-    └─► [GND Screw Terminal] ──► COMMON GROUND RAIL
-                                     ├─► 9V Battery (-) Black lead
-                                     ├─► Band ESP32 GND
-                                     ├─► All 4 Servos GND (Brown/Black wires)
-                                     ├─► MPU6050 GND
-                                     └─► Buzzer / LED GNDs
+       [9V Battery]
+       (+) Red wire ──► L298N "+12V" Screw Terminal
+       (-) Black wire ─► L298N "GND" Screw Terminal
+                              │
+                    [L298N Regulator Board]
+                    (5V-EN Jumper MUST BE ON!)
+                              │
+          ┌───────────────────┴───────────────────┐
+          ▼                                       ▼
+  L298N "+5V" Terminal                    L298N "GND" Terminal
+          │                                       │
+          ▼                                       ▼
+BREADBOARD RED RAIL (+5V)               BREADBOARD BLUE RAIL (GND)
+(Powers all 4 Servos & ESP32 VIN)       (COMMON REFERENCE GROUND)
+                                                  │
+                                 ┌────────────────┼────────────────┐
+                                 ▼                ▼                ▼
+                            ESP32 GND        Servos GND       MPU6050 GND
 ```
 
-### Safety & Regulator Rules
-* **L298N as 5V Regulator:** 9V battery (+) connects to L298N `+12V` terminal; (-) connects to L298N `GND`. Ensure the **5V-EN** jumper is in place.
-* The L298N onboard regulator supplies ~0.5 A. Firmwares are built to activate only **one servo at a time** (50 ms stagger).
-* **Common Ground:** Ground of battery, L298N, ESP32, servos, and MPU6050 MUST be bonded together.
-* **Logic Levels:** ESP32 logic is 3.3V. Servo signal wires connect directly to GPIO pins. Servos receive 5V power from the L298N rail.
+### Safety & Power Rules:
+* **Never Power Servos from ESP32 Pins:** Servos draw peak currents up to 800 mA. They MUST be powered by the L298N +5V rail.
+* **Common Ground:** The battery (-), L298N GND, ESP32 GND, Servos GND, and MPU6050 GND must all be connected to a single common breadboard ground rail.
+* **Logic Levels:** ESP32 3.3V logic drives the servo signal lines directly (SG90 accepts 3.3V PWM).
 
 ---
 
-## 2. Station Unit Pinout
+## 2. Master Wearable Band Pinout Table
 
-Powered via Laptop USB.
-
-| Function | ESP32 GPIO | Mode | Description |
-| :--- | :--- | :--- | :--- |
-| **Platform Preset Button** | `GPIO 32` | `INPUT_PULLUP` | Connect to GND on press (Preset: Platform 2) |
-| **Delay Preset Button** | `GPIO 33` | `INPUT_PULLUP` | Connect to GND on press |
-| **Departure Preset Button** | `GPIO 25` | `INPUT_PULLUP` | Connect to GND on press |
-| **Urgent Preset Button** | `GPIO 26` | `INPUT_PULLUP` | Connect to GND on press |
-| **Optional Station Buzzer** | `GPIO 27` | `OUTPUT` | Station acoustic confirmation |
-
----
-
-## 3. Wearable Band Pinout
-
-Powered by L298N 5V rail / USB.
-
-| Function | ESP32 GPIO | Pin Type | Notes |
-| :--- | :--- | :--- | :--- |
-| **Servo M1 (Attention / Platform)** | `GPIO 18` | PWM / Output | Signal (Orange/Yellow). Power from 5V rail. |
-| **Servo M2 (Platform Count / Delay)** | `GPIO 19` | PWM / Output | Signal (Orange/Yellow). Power from 5V rail. |
-| **Servo M3 (Departure)** | `GPIO 23` | PWM / Output | Signal (Orange/Yellow). Power from 5V rail. |
-| **Servo M4 (Urgent / Cancel)** | `GPIO 25` | PWM / Output | Signal (Orange/Yellow). Power from 5V rail. |
-| **MPU6050 SDA** | `GPIO 21` | I2C Data | Connect to module SDA |
-| **MPU6050 SCL** | `GPIO 22` | I2C Clock | Connect to module SCL |
-| **MPU6050 AD0** | `GND` | Ground | Forces I2C address to `0x68` |
-| **Profile Cycle Button** | `GPIO 4` | `INPUT_PULLUP` | Connect to GND on press |
-| **Active Buzzer (Blind Profile)** | `GPIO 26` | `OUTPUT` | Active buzzer (+) to GPIO 26, (-) to GND |
-| **Blue LED (Platform)** | `GPIO 13` | `OUTPUT` | Anode via 220 Ω resistor, Cathode to GND |
-| **Orange/Yellow LED (Delay)** | `GPIO 14` | `OUTPUT` | Anode via 220 Ω resistor, Cathode to GND |
-| **Green LED (Departure)** | `GPIO 27` | `OUTPUT` | Anode via 220 Ω resistor, Cathode to GND |
-| **Red LED (Urgent)** | `GPIO 33` | `OUTPUT` | Anode via 220 Ω resistor, Cathode to GND |
+| ESP32 Pin | Connected Component | Wire / Terminal | Purpose / Notes |
+| :---: | :--- | :--- | :--- |
+| **`GPIO 18`** | Servo $M1$ | Signal (Orange) | Wave leader / Platform marker tap |
+| **`GPIO 19`** | Servo $M2$ | Signal (Orange) | Platform count taps / Delay alert taps |
+| **`GPIO 23`** | Servo $M3$ | Signal (Orange) | Boarding / Departure long tap |
+| **`GPIO 25`** | Servo $M4$ | Signal (Orange) | Urgent rapid taps / Cancel tap |
+| **`GPIO 21`** | MPU6050 SDA | Jumper | $I^2C$ Data line |
+| **`GPIO 22`** | MPU6050 SCL | Jumper | $I^2C$ Clock line |
+| **`GPIO 4`**  | Profile Button | Jumper to GND | Internal `INPUT_PULLUP`, cycles profile |
+| **`GPIO 26`** | Active Buzzer | Buzzer (+) | Acoustic rhythm for blind profile |
+| **`GPIO 13`** | Blue LED | Anode via 220 Ω | Platform visual indicator |
+| **`GPIO 14`** | Orange/Yellow LED | Anode via 220 Ω | Delay visual indicator |
+| **`GPIO 27`** | Green LED | Anode via 220 Ω | Departure visual indicator |
+| **`GPIO 33`** | Red LED | Anode via 220 Ω | Urgent visual indicator |
+| **`3.3V`**    | MPU6050 VCC | Jumper | Sensor logic power |
+| **`GND`**     | Common Ground Rail | Jumper | Universal circuit ground |
+| **`VIN`**     | L298N +5V Rail | Jumper | Untethered board power |
 
 ---
 
-## 4. Mechanical & Sensor Setup
+## 3. Resistor & LED Identification
 
-1. **SG90 Servos:**
-   - Mount in line along the band: $M1 \to M2 \to M3 \to M4$.
-   - Horn at rest sits slightly retracted; during tap, swings 30° to 40° against user's wrist/arm.
-   - Do not allow horns to physically jam.
-2. **MPU6050:**
-   - Mount firmly to the band strap so double-taps on the arm/wrist directly transmit shock waves to the accelerometer.
+* **LEDs:** Long leg = Anode (+), Short leg / flat rim edge = Cathode (-).
+* **220 Ω Resistor Color Code:** **Red — Red — Brown — Gold**.
+* Do NOT use 220 kΩ (Red — Red — Yellow — Gold).

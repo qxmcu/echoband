@@ -1,4 +1,4 @@
-// ui.js — Accessible DOM rendering, multilingual cards, and speech synthesis for EchoBand
+// ui.js — Accessible DOM rendering, multilingual cards, timeline, and speech synthesis for EchoBand
 
 import { ALERT_TYPES, ALERT_NAMES, ALERT_LABELS } from './match.js';
 
@@ -20,16 +20,13 @@ export class UIManager {
     this.elLabelHi        = document.getElementById('labelHi');
     this.elAlertBadge     = document.getElementById('alertBadge');
 
-    // Live status widgets
-    this.elStatMsgId      = document.getElementById('statMsgId');
-    this.elStatType       = document.getElementById('statType');
-    this.elStatBands      = document.getElementById('statBands');
-    this.elStatRx         = document.getElementById('statRx');
-    this.elStatAck        = document.getElementById('statAck');
-    this.elStatUnconf     = document.getElementById('statUnconf');
-    this.elRawStatusLine  = document.getElementById('rawStatusLine');
+    // Timeline elements
+    this.elTimelineSent   = document.getElementById('tlSent');
+    this.elTimelineRx     = document.getElementById('tlRx');
+    this.elTimelineAck    = document.getElementById('tlAck');
+    this.elTimelineMsg    = document.getElementById('tlStatusMsg');
 
-    // Controls & inputs
+    // Profile & Transcript
     this.elProfileSelect  = document.getElementById('profileSelect');
     this.elTranscriptText = document.getElementById('transcriptText');
     this.elAsrStatus      = document.getElementById('asrStatus');
@@ -37,16 +34,25 @@ export class UIManager {
     this.elAsrProgressWrap= document.getElementById('asrProgressWrap');
 
     this.currentProfile = 'deaf';
+    this.ackTimer = null;
     this.initProfileListener();
   }
 
   initProfileListener() {
     if (this.elProfileSelect) {
       this.elProfileSelect.addEventListener('change', (e) => {
-        this.currentProfile = e.target.value;
-        console.log('[UI] Profile changed to:', this.currentProfile);
+        this.setProfile(e.target.value.toLowerCase(), false);
       });
     }
+  }
+
+  setProfile(profileName, updateDropdown = true) {
+    const clean = profileName.toLowerCase();
+    this.currentProfile = clean;
+    if (updateDropdown && this.elProfileSelect) {
+      this.elProfileSelect.value = clean;
+    }
+    console.log('[UI] Profile active:', this.currentProfile);
   }
 
   setAsrStatus(text, progress = null) {
@@ -71,7 +77,7 @@ export class UIManager {
   }
 
   /**
-   * Displays the active alert visually, trilingually, and acoustically if Blind profile.
+   * Displays the active alert visually, trilingually, and acoustically.
    */
   displayAlert(type, arg = 0, customLabels = null) {
     if (!type || type === ALERT_TYPES.NONE) {
@@ -85,25 +91,25 @@ export class UIManager {
       hi: ALERT_LABELS[type].hi(arg)
     };
 
-    // 1. Update Pictogram
+    // Update Pictogram
     const iconSrc = PICTOGRAM_MAP[type] || './assets/platform.svg';
     if (this.elPictogramImg) {
       this.elPictogramImg.src = iconSrc;
       this.elPictogramImg.alt = labels.en;
     }
 
-    // 2. Update Trilingual Text
+    // Update Trilingual Text
     if (this.elLabelEn) this.elLabelEn.textContent = labels.en;
     if (this.elLabelMl) this.elLabelMl.textContent = labels.ml;
     if (this.elLabelHi) this.elLabelHi.textContent = labels.hi;
 
-    // 3. Update Badge
+    // Update Badge
     if (this.elAlertBadge) {
       this.elAlertBadge.textContent = ALERT_NAMES[type] + (arg ? ` (Platform ${arg})` : '');
       this.elAlertBadge.className = `badge badge-${ALERT_NAMES[type].toLowerCase()}`;
     }
 
-    // High visual highlight animation
+    // High visual highlight
     if (this.elAlertCard) {
       this.elAlertCard.classList.remove('pulse-urgent');
       if (type === ALERT_TYPES.URGENT) {
@@ -111,10 +117,13 @@ export class UIManager {
       }
     }
 
-    // 4. Blind Profile: Acoustic speech readout
+    // Blind Profile: Acoustic speech readout
     if (this.currentProfile === 'blind') {
       this.speakAnnouncement(labels.en);
     }
+
+    // Timeline: Step 1 (SENT)
+    this.startTimeline();
   }
 
   resetAlert() {
@@ -128,48 +137,54 @@ export class UIManager {
     if (this.elAlertCard) this.elAlertCard.classList.remove('pulse-urgent');
   }
 
+  // --- Alert Timeline Flow (SENT -> RECEIVED -> ACKNOWLEDGED / NOT CONFIRMED) ---
+  startTimeline() {
+    if (this.ackTimer) clearTimeout(this.ackTimer);
+
+    if (this.elTimelineSent) this.elTimelineSent.className = 'tl-step active';
+    if (this.elTimelineRx)   this.elTimelineRx.className   = 'tl-step';
+    if (this.elTimelineAck)  this.elTimelineAck.className  = 'tl-step';
+    if (this.elTimelineMsg) {
+      this.elTimelineMsg.textContent = 'Alert sent to EchoBand...';
+      this.elTimelineMsg.className   = 'tl-msg';
+    }
+
+    // 15s unconfirmed countdown
+    this.ackTimer = setTimeout(() => {
+      if (this.elTimelineAck && !this.elTimelineAck.classList.contains('active')) {
+        this.elTimelineAck.className = 'tl-step failed';
+        if (this.elTimelineMsg) {
+          this.elTimelineMsg.textContent = '⚠️ NOT CONFIRMED after 15 s (Wearer has not double-tapped)';
+          this.elTimelineMsg.className   = 'tl-msg tl-msg-danger';
+        }
+      }
+    }, 15000);
+  }
+
+  markReceived(msgId) {
+    if (this.elTimelineRx)  this.elTimelineRx.className = 'tl-step active';
+    if (this.elTimelineMsg) {
+      this.elTimelineMsg.textContent = `EchoBand playing sensory wave (Msg #${msgId})...`;
+    }
+  }
+
+  markAcknowledged(msgId) {
+    if (this.ackTimer) clearTimeout(this.ackTimer);
+    if (this.elTimelineAck) this.elTimelineAck.className = 'tl-step active-success';
+    if (this.elTimelineMsg) {
+      this.elTimelineMsg.textContent = `✅ ACKNOWLEDGED: Double-tap confirmed on wrist (Msg #${msgId})!`;
+      this.elTimelineMsg.className   = 'tl-msg tl-msg-success';
+    }
+  }
+
   speakAnnouncement(text) {
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel(); // Stop prior speech
+      window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       utter.rate = 1.0;
       utter.pitch = 1.0;
       window.speechSynthesis.speak(utter);
       console.log('[TTS] Speaking:', text);
-    }
-  }
-
-  /**
-   * Parses and updates Station status line:
-   * e.g. "msg=12 type=1 arg=2 bands=2 rx=2 ack=1 unconfirmed=A4"
-   */
-  updateStatusLine(line) {
-    if (!line) return;
-    if (this.elRawStatusLine) this.elRawStatusLine.textContent = line;
-
-    const parts = line.split(' ');
-    const kv = {};
-    for (const p of parts) {
-      const [k, v] = p.split('=');
-      if (k && v !== undefined) kv[k] = v;
-    }
-
-    if (kv.msg !== undefined && this.elStatMsgId) this.elStatMsgId.textContent = kv.msg;
-    if (kv.type !== undefined && this.elStatType) {
-      const tNum = parseInt(kv.type, 10);
-      this.elStatType.textContent = ALERT_NAMES[tNum] || 'NONE';
-    }
-    if (kv.bands !== undefined && this.elStatBands) this.elStatBands.textContent = kv.bands;
-    if (kv.rx !== undefined && this.elStatRx) this.elStatRx.textContent = kv.rx;
-    if (kv.ack !== undefined && this.elStatAck) this.elStatAck.textContent = kv.ack;
-
-    if (kv.unconfirmed !== undefined && this.elStatUnconf) {
-      this.elStatUnconf.textContent = kv.unconfirmed;
-      if (kv.unconfirmed === 'NONE') {
-        this.elStatUnconf.className = 'status-pill status-pill-success';
-      } else {
-        this.elStatUnconf.className = 'status-pill status-pill-danger';
-      }
     }
   }
 }

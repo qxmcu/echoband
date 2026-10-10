@@ -1,4 +1,4 @@
-// app.js — Main Application Coordinator for EchoBand Phone Web App
+// app.js — Main Application Coordinator for EchoBand Phone Web App (Single-Band Direct BLE)
 
 import { BleTransport, SerialTransport, MockTransport } from './transport.js';
 import { AudioEngine } from './audio.js';
@@ -13,6 +13,7 @@ class EchoBandApp {
     this.asrWorker = null;
 
     this.selectedPlatform = 2; // Default Platform 2
+    this.currentMsgSeq = 1;
     this.isWorkerReady = false;
 
     // DOM Bindings
@@ -21,6 +22,7 @@ class EchoBandApp {
     this.elBtnListen        = document.getElementById('btnListen');
     this.elAsrLangSelect    = document.getElementById('asrLanguage');
     this.elAudioLevelBar    = document.getElementById('audioLevelBar');
+    this.elConnBadge        = document.getElementById('connBadge');
 
     this.initTransport();
     this.initOperatorButtons();
@@ -77,23 +79,56 @@ class EchoBandApp {
     }
 
     this.transport.onStatus((line) => {
-      this.ui.updateStatusLine(line);
+      this.handleIncomingStatus(line);
     });
+  }
+
+  handleIncomingStatus(line) {
+    console.log('[App Status]', line);
+    if (!line) return;
+
+    if (line.startsWith('RX ')) {
+      const msgId = parseInt(line.substring(3).trim(), 10) || 0;
+      this.ui.markReceived(msgId);
+    } else if (line.startsWith('ACK ')) {
+      const msgId = parseInt(line.substring(4).trim(), 10) || 0;
+      this.ui.markAcknowledged(msgId);
+    } else if (line.startsWith('PROFILE ')) {
+      const pName = line.substring(8).trim();
+      this.ui.setProfile(pName);
+    } else if (line === 'STATUS CONNECTED') {
+      if (this.elConnBadge) {
+        this.elConnBadge.textContent = 'Connected';
+        this.elConnBadge.style.color = '#4ade80';
+      }
+    } else if (line === 'STATUS DISCONNECTED') {
+      if (this.elConnBadge) {
+        this.elConnBadge.textContent = 'Disconnected';
+        this.elConnBadge.style.color = '#f87171';
+      }
+    }
   }
 
   updateConnectButton(connected) {
     if (connected) {
       this.elBtnConnect.textContent = 'Disconnect';
       this.elBtnConnect.className = 'btn-connected';
+      if (this.elConnBadge) {
+        this.elConnBadge.textContent = 'Connected';
+        this.elConnBadge.style.color = '#4ade80';
+      }
     } else {
       this.elBtnConnect.textContent = 'Connect';
       this.elBtnConnect.className = 'btn-connect';
+      if (this.elConnBadge) {
+        this.elConnBadge.textContent = 'Disconnected';
+        this.elConnBadge.style.color = '#94a3b8';
+      }
     }
   }
 
   // --- 2. Operator Buttons (Primary Path) ---
   initOperatorButtons() {
-    // Platform number selector (P1..P5)
     const platBtns = document.querySelectorAll('.btn-pnum');
     platBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -103,7 +138,6 @@ class EchoBandApp {
       });
     });
 
-    // Alert buttons
     document.getElementById('btnOpPlatform').addEventListener('click', () => {
       this.triggerAlert(ALERT_TYPES.PLATFORM, this.selectedPlatform);
     });
@@ -122,11 +156,15 @@ class EchoBandApp {
   }
 
   async triggerAlert(type, arg = 0, labels = null) {
+    this.currentMsgSeq = (this.currentMsgSeq + 1) % 255;
+    if (this.currentMsgSeq === 0) this.currentMsgSeq = 1;
+    const msgId = this.currentMsgSeq;
+
     this.ui.displayAlert(type, arg, labels);
 
     if (this.transport && this.transport.isConnected()) {
       try {
-        await this.transport.send(type, arg);
+        await this.transport.send(type, arg, msgId);
       } catch (err) {
         console.error('[App] Transport send error:', err);
       }
@@ -179,7 +217,7 @@ class EchoBandApp {
         if (state === 'listening') {
           this.elBtnListen.textContent = 'Stop Mic';
           this.elBtnListen.classList.add('listening');
-          this.ui.setAsrStatus('Listening for speech (Whisper Gate)...');
+          this.ui.setAsrStatus('Listening (Whisper Gate)...');
         } else if (state === 'recording') {
           this.ui.setAsrStatus('Speech detected! Recording...');
         } else if (state === 'processing') {
@@ -251,7 +289,6 @@ class EchoBandApp {
         }
       };
 
-      // Trigger lazy worker init
       this.asrWorker.postMessage({
         type: 'init',
         language: this.elAsrLangSelect.value
@@ -274,7 +311,6 @@ class EchoBandApp {
 
   // --- 5. Quick Speech Simulators & Judges Demo Helper ---
   initSpeechSimulators() {
-    // Quick phrase chips
     const chips = document.querySelectorAll('.btn-chip');
     chips.forEach((chip) => {
       chip.addEventListener('click', () => {
@@ -283,7 +319,6 @@ class EchoBandApp {
       });
     });
 
-    // Manual input test
     const input = document.getElementById('manualSpeechInput');
     const parseBtn = document.getElementById('btnSimulateSpeech');
     if (parseBtn && input) {

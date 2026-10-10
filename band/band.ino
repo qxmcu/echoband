@@ -1,12 +1,10 @@
-// band.ino — EchoBand Wearable Band Firmware
-// Non-blocking tactile engine, MPU6050 double-tap detector, Profiles, ESP-NOW
+// band.ino — EchoBand Wearable Armband Firmware (Single ESP32 Board Architecture)
+// BLE Peripheral (NimBLE), Non-Blocking Tactile Wave Engine, MPU6050 Double-Tap Detector
 
-#include <WiFi.h>
-#include <esp_now.h>
-#include <esp_wifi.h>
 #include <Wire.h>
 #include <Preferences.h>
 #include <ESP32Servo.h>
+#include <NimBLEDevice.h>
 #include "protocol.h"
 
 // --- Hardware Pin Definitions ---
@@ -28,7 +26,7 @@ static const uint8_t PIN_LED_RED     = 33; // Urgent / Cancel
 
 // --- Servo Configuration ---
 static const int SERVO_REST_ANGLE = 10;
-static const int SERVO_TAP_ANGLE  = 45; // 35 deg deflection tap
+static const int SERVO_TAP_ANGLE  = 45; // 35° outward swing
 
 static Servo servoM1;
 static Servo servoM2;
@@ -36,35 +34,30 @@ static Servo servoM3;
 static Servo servoM4;
 static Servo* servos[4] = { &servoM1, &servoM2, &servoM3, &servoM4 };
 
-// --- Tactile Timing Constants (ms) ---
-static const uint16_t T_TAP_SHORT    = 200;
-static const uint16_t T_TAP_LONG     = 600;
-static const uint16_t T_TAP_RAPID    = 150;
-static const uint16_t T_GAP          = 200;
-static const uint16_t T_WAVE_STAGGER = 50;
-
 // --- MPU6050 Constants ---
 static const uint8_t  MPU6050_ADDR   = 0x68;
-static const float    TAP_G_THRESH   = 2.5f; // Acceleration threshold (g)
+static const float    TAP_G_THRESH   = 2.5f; // Threshold (g)
 static const uint32_t TAP_MIN_GAP_MS = 80;   // Min gap between taps
 static const uint32_t TAP_MAX_GAP_MS = 600;  // Max gap between taps
-static const uint32_t TAP_LOCKOUT_MS = 400;  // Lockout after valid double-tap
+static const uint32_t TAP_LOCKOUT_MS = 400;  // Lockout after confirmed double-tap
+
+// --- BLE References ---
+static NimBLEServer*         pServer     = nullptr;
+static NimBLECharacteristic* pStatusChar = nullptr;
+static bool                  bleConnected = false;
 
 // --- Profile & Persistent State ---
 static Preferences prefs;
 static uint8_t     currentProfile = PROFILE_DEAF;
-static uint8_t     bandId = 0;
-static uint8_t     stationMac[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-static bool        hasStationMac = false;
-static uint8_t     broadcastMac[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-// Alert Tracking
-static uint16_t lastMsgId = 0;
-static uint8_t  activeAlertKind = T_NONE;
-static uint8_t  activeAlertArg  = 0;
+// Alert State Tracking
+static uint8_t  activeType      = ALERT_STOP;
+static uint8_t  activeArg       = 0;
+static uint8_t  activeMsgId     = 0;
 static bool     isAlertPlaying  = false;
 static bool     isRepeating     = false;
 static uint8_t  repeatCount     = 0;
+static uint32_t alertStartMs    = 0;
 static uint32_t nextRepeatMs    = 0;
 
 // Button debounce
@@ -76,10 +69,10 @@ static uint32_t firstTapMs = 0;
 static uint32_t lastDoubleTapMs = 0;
 static uint32_t lastMpuSampleMs = 0;
 
-// Heartbeat
-static uint32_t lastHelloMs = 0;
+// Serial input buffer
+static String serialBuffer = "";
 
-// --- Non-Blocking Tactile Step Queue ---
+// --- Non-Blocking Step Queue ---
 struct TactileStep {
   int8_t   servoIdx;    // 0=M1, 1=M2, 2=M3, 3=M4, -1=None
   bool     active;      // true=tap position, false=rest position
@@ -104,7 +97,6 @@ void clearQueue() {
   queueTail = 0;
   queueCount = 0;
   currentStepDuration = 0;
-  // Return all servos to rest
   for (int i = 0; i < 4; i++) {
     servos[i]->write(SERVO_REST_ANGLE);
   }
@@ -129,151 +121,139 @@ bool pushStep(int8_t sIdx, bool act, uint16_t dur, int8_t led = -1, bool ledSt =
   return true;
 }
 
-// Helper to push a tap + rest gap
-void appendTap(int8_t sIdx, uint16_t tapMs, uint16_t gapMs = T_GAP, int8_t led = -1) {
+void appendTap(int8_t sIdx, uint16_t tapMs, uint16_t gapMs = ECHOBAND_GAP_MS, int8_t led = -1) {
   bool buzz = (currentProfile == PROFILE_BLIND);
   pushStep(sIdx, true,  tapMs, led, true, buzz);
   pushStep(sIdx, false, gapMs, led, false, false);
 }
 
-// Build sensory sequences
+// Forward declarations
+void notifyStatus(const char* line);
+void cycleProfile();
+bool initMPU6050();
+void checkMPU6050();
+void processCommand(uint8_t type, uint8_t arg, uint8_t msgId);
+void processSerialLine(String line);
+const char* getProfileName(uint8_t p);
+
+// --- Build Sensory Patterns ---
 void buildPattern(uint8_t type, uint8_t arg) {
   clearQueue();
 
   int8_t ledPin = -1;
   if (currentProfile == PROFILE_DEAF) {
-    if (type == T_PLATFORM)  ledPin = PIN_LED_BLUE;
-    if (type == T_DELAY)     ledPin = PIN_LED_ORANGE;
-    if (type == T_DEPARTURE) ledPin = PIN_LED_GREEN;
-    if (type == T_URGENT || type == T_CANCELLED) ledPin = PIN_LED_RED;
+    if (type == ALERT_PLATFORM)  ledPin = PIN_LED_BLUE;
+    if (type == ALERT_DELAY)     ledPin = PIN_LED_ORANGE;
+    if (type == ALERT_DEPARTURE) ledPin = PIN_LED_GREEN;
+    if (type == ALERT_URGENT || type == ALERT_CANCELLED) ledPin = PIN_LED_RED;
   }
 
-  // 1. Attention Wave: M1 -> M2 -> M3 -> M4
+  // 1. Attention Wave: M1 -> M2 -> M3 -> M4 (50ms stagger)
   pushStep(0, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
-  pushStep(0, false, T_WAVE_STAGGER);
+  pushStep(0, false, ECHOBAND_WAVE_STAGGER_MS);
   pushStep(1, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
-  pushStep(1, false, T_WAVE_STAGGER);
+  pushStep(1, false, ECHOBAND_WAVE_STAGGER_MS);
   pushStep(2, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
-  pushStep(2, false, T_WAVE_STAGGER);
+  pushStep(2, false, ECHOBAND_WAVE_STAGGER_MS);
   pushStep(3, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
-  pushStep(3, false, T_GAP);
+  pushStep(3, false, ECHOBAND_GAP_MS);
 
   if (currentProfile == PROFILE_LANGUAGE) {
-    // Language profile: minimal band output (one attention wave only)
+    // Language: attention wave only
     isAlertPlaying = true;
     return;
   }
 
   // 2. Alert Payload
   switch (type) {
-    case T_PLATFORM: {
+    case ALERT_PLATFORM: {
       uint8_t count = (arg >= 1 && arg <= 5) ? arg : 1;
-      appendTap(0, T_TAP_LONG, T_GAP, ledPin); // M1 long tap
+      appendTap(0, ECHOBAND_LONG_TAP_MS, ECHOBAND_GAP_MS, ledPin); // M1 long tap
       for (uint8_t i = 0; i < count; i++) {
-        appendTap(1, T_TAP_SHORT, T_GAP, ledPin); // N short taps on M2
+        appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin); // N short taps on M2
       }
       break;
     }
-    case T_DELAY: {
-      appendTap(1, T_TAP_SHORT, T_GAP, ledPin); // M2 two short taps
-      appendTap(1, T_TAP_SHORT, T_GAP, ledPin);
+    case ALERT_DELAY: {
+      appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin); // M2 two short taps
+      appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       break;
     }
-    case T_DEPARTURE: {
-      appendTap(2, T_TAP_LONG, T_GAP, ledPin);  // M3 long tap
+    case ALERT_DEPARTURE: {
+      appendTap(2, ECHOBAND_LONG_TAP_MS, ECHOBAND_GAP_MS, ledPin);  // M3 long tap
       break;
     }
-    case T_URGENT: {
-      appendTap(3, T_TAP_RAPID, 80, ledPin);   // M4 three rapid taps
-      appendTap(3, T_TAP_RAPID, 80, ledPin);
-      appendTap(3, T_TAP_RAPID, T_GAP, ledPin);
+    case ALERT_URGENT: {
+      appendTap(3, ECHOBAND_RAPID_TAP_MS, 80, ledPin);             // M4 three rapid taps
+      appendTap(3, ECHOBAND_RAPID_TAP_MS, 80, ledPin);
+      appendTap(3, ECHOBAND_RAPID_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       break;
     }
-    case T_CANCELLED: {
-      appendTap(1, T_TAP_SHORT, T_GAP, ledPin); // M2 then M4
-      appendTap(3, T_TAP_SHORT, T_GAP, ledPin);
+    case ALERT_CANCELLED: {
+      appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin); // M2 then M4
+      appendTap(3, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       break;
     }
   }
 
-  // 3. Message Ended Wave (reverse of Attention): M4 -> M3 -> M2 -> M1
+  // 3. Message Ended Wave (Reverse of Attention): M4 -> M3 -> M2 -> M1
   pushStep(3, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
-  pushStep(3, false, T_WAVE_STAGGER);
+  pushStep(3, false, ECHOBAND_WAVE_STAGGER_MS);
   pushStep(2, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
-  pushStep(2, false, T_WAVE_STAGGER);
+  pushStep(2, false, ECHOBAND_WAVE_STAGGER_MS);
   pushStep(1, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
-  pushStep(1, false, T_WAVE_STAGGER);
+  pushStep(1, false, ECHOBAND_WAVE_STAGGER_MS);
   pushStep(0, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
-  pushStep(0, false, T_GAP);
+  pushStep(0, false, ECHOBAND_GAP_MS);
 
   isAlertPlaying = true;
 }
 
-// Forward declarations
-void sendPacket(uint8_t kind, uint16_t mId);
-void cycleProfile();
-bool initMPU6050();
-void checkMPU6050();
+// --- BLE Callbacks ---
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer) override {
+    bleConnected = true;
+    Serial.println("[BLE] Phone connected to EchoBand!");
+    char buf[32];
+    snprintf(buf, sizeof(buf), "PROFILE %s", getProfileName(currentProfile));
+    notifyStatus(buf);
+  }
+  void onDisconnect(NimBLEServer* pServer) override {
+    bleConnected = false;
+    Serial.println("[BLE] Phone disconnected");
+    NimBLEDevice::startAdvertising();
+  }
+};
 
-// --- ESP-NOW Receive Callback ---
-#if defined(ESP_IDF_VERSION_MAJOR) && (ESP_IDF_VERSION_MAJOR >= 5)
-void onDataReceive(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
-  const uint8_t *mac_addr = recv_info->src_addr;
-#else
-void onDataReceive(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
-#endif
-  if (len != sizeof(EchoPacket)) return;
-
-  const EchoPacket *pkt = (const EchoPacket*)incomingData;
-  if (pkt->magic != ECHO_MAGIC) return;
-
-  if (pkt->kind == K_ALERT) {
-    // Save station MAC
-    memcpy(stationMac, mac_addr, 6);
-    hasStationMac = true;
-
-    // Deduplicate
-    if (pkt->msgId == lastMsgId) {
-      return;
-    }
-
-    lastMsgId = pkt->msgId;
-    activeAlertKind = pkt->type;
-    activeAlertArg  = pkt->arg;
-
-    Serial.printf("[ALERT RX] msgId=%u type=%u arg=%u\n", pkt->msgId, pkt->type, pkt->arg);
-
-    // Send RECEIVED packet immediately
-    sendPacket(K_RECEIVED, lastMsgId);
-
-    // Build and play pattern
-    buildPattern(activeAlertKind, activeAlertArg);
-
-    // Check if repeat is required
-    if (activeAlertKind == T_URGENT || currentProfile == PROFILE_DEAFBLIND) {
-      isRepeating = true;
-      repeatCount = 1;
-      nextRepeatMs = millis() + ECHO_URGENT_REPEAT_MS;
-    } else {
-      isRepeating = false;
+class CommandCallback : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* pChar) override {
+    std::string val = pChar->getValue();
+    if (val.length() >= 3) {
+      uint8_t type  = (uint8_t)val[0];
+      uint8_t arg   = (uint8_t)val[1];
+      uint8_t msgId = (uint8_t)val[2];
+      Serial.printf("[BLE RX] Command: type=%u, arg=%u, msgId=%u\n", type, arg, msgId);
+      processCommand(type, arg, msgId);
     }
   }
-}
+};
 
 // --- Setup ---
 void setup() {
   Serial.begin(115200);
   delay(500);
-  Serial.println("\n=== EchoBand Wearable Starting ===");
+  Serial.println("\n==================================");
+  Serial.println("  EchoBand — Wearable Haptic Band ");
+  Serial.println("==================================");
 
-  // Load saved profile from NVS
+  // Load saved profile
   prefs.begin("echoband", false);
   currentProfile = prefs.getUChar("profile", PROFILE_DEAF);
   if (currentProfile >= PROFILE_COUNT) currentProfile = PROFILE_DEAF;
   prefs.end();
-  Serial.printf("[INIT] Current Profile: %u\n", currentProfile);
+  Serial.printf("[INIT] Active Profile: %s (%u)\n", getProfileName(currentProfile), currentProfile);
 
-  // Pin modes
+  // Pin initialization
   pinMode(PIN_BTN_PROFILE, INPUT_PULLUP);
   pinMode(PIN_BUZZER, OUTPUT);
   pinMode(PIN_LED_BLUE, OUTPUT);
@@ -287,7 +267,7 @@ void setup() {
   digitalWrite(PIN_LED_GREEN, LOW);
   digitalWrite(PIN_LED_RED, LOW);
 
-  // Attach servos (ESP32PWM timers)
+  // Allocate PWM timers & attach servos
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
   ESP32PWM::allocateTimer(2);
@@ -307,44 +287,46 @@ void setup() {
     servos[i]->write(SERVO_REST_ANGLE);
   }
 
-  // Init MPU6050
+  // Initialize MPU6050
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
   if (initMPU6050()) {
-    Serial.println("[OK] MPU6050 Accelerometer initialized (+/- 8g)");
+    Serial.println("[OK] MPU6050 Accelerometer ready (+/- 8g)");
   } else {
-    Serial.println("[WARN] MPU6050 not detected on 0x68");
+    Serial.println("[WARN] MPU6050 not detected at 0x68 (Check SDA=21, SCL=22)");
   }
 
-  // Wi-Fi & ESP-NOW
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-  esp_wifi_set_channel(ECHO_WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  // Initialize NimBLE peripheral as "EchoBand"
+  NimBLEDevice::init("EchoBand");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+  pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
 
-  uint8_t mac[6];
-  WiFi.macAddress(mac);
-  bandId = mac[5];
-  Serial.printf("[INIT] Band ID: 0x%02X (MAC: %02X:%02X:%02X:%02X:%02X:%02X)\n",
-    bandId, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  NimBLEService* pService = pServer->createService(ECHOBAND_SERVICE_UUID);
 
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("[ERROR] Failed to init ESP-NOW!");
-  } else {
-    Serial.println("[OK] ESP-NOW initialized on Channel 1");
-  }
+  // Command Characteristic: Write / Write No Response (3 bytes: [type, arg, msgId])
+  NimBLECharacteristic* pCmdChar = pService->createCharacteristic(
+    ECHOBAND_CHAR_COMMAND_UUID,
+    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
+  );
+  pCmdChar->setCallbacks(new CommandCallback());
 
-  // Add broadcast peer
-  esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, broadcastMac, 6);
-  peerInfo.channel = ECHO_WIFI_CHANNEL;
-  peerInfo.encrypt = false;
-  esp_now_add_peer(&peerInfo);
+  // Status Characteristic: Notify (ASCII strings: RX <msgId>, ACK <msgId>, PROFILE <name>)
+  pStatusChar = pService->createCharacteristic(
+    ECHOBAND_CHAR_STATUS_UUID,
+    NIMBLE_PROPERTY::NOTIFY
+  );
 
-  esp_now_register_recv_cb(onDataReceive);
+  pService->start();
 
-  // Send initial boot HELLO
-  sendPacket(K_HELLO, 0);
+  NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
+  pAdv->addServiceUUID(ECHOBAND_SERVICE_UUID);
+  pAdv->setName("EchoBand");
+  pAdv->start();
+  Serial.println("[OK] BLE Advertising as 'EchoBand'");
 
-  // Power-on confirmation tap
+  Serial.println("\nSerial test commands ready: 'A 1 2' (Platform 2), 'A 4 0' (Urgent), 'P' (Cycle Profile)");
+
+  // Boot confirm tap on M1
   appendTap(0, 100, 50);
 }
 
@@ -352,15 +334,14 @@ void setup() {
 void loop() {
   uint32_t now = millis();
 
-  // 1. Process Tactile Queue (Non-blocking)
+  // 1. Process Tactile Step Queue (Non-blocking)
   if (queueCount > 0) {
     if (currentStepDuration == 0) {
-      // Start step
       TactileStep &step = queue[queueHead];
       currentStepStartMs = now;
       currentStepDuration = step.durationMs;
 
-      // Servos: move only one at a time
+      // Move only one servo at a time
       if (step.servoIdx >= 0 && step.servoIdx < 4) {
         if (step.active) {
           servos[step.servoIdx]->write(SERVO_TAP_ANGLE);
@@ -374,15 +355,11 @@ void loop() {
         currentlyActiveServo = -1;
       }
 
-      // Buzzer
       digitalWrite(PIN_BUZZER, step.buzzerState ? HIGH : LOW);
-
-      // LED
       if (step.ledPin > 0) {
         digitalWrite(step.ledPin, step.ledState ? HIGH : LOW);
       }
     } else if (now - currentStepStartMs >= currentStepDuration) {
-      // Finished current step, advance queue
       TactileStep &step = queue[queueHead];
       if (step.ledPin > 0) digitalWrite(step.ledPin, LOW);
       digitalWrite(PIN_BUZZER, LOW);
@@ -401,16 +378,31 @@ void loop() {
     }
   }
 
-  // 2. Urgent / Deafblind Pattern Repeat
+  // 2. Alert Repeat Rules
   if (isRepeating && !isAlertPlaying) {
-    if (now >= nextRepeatMs) {
-      if (repeatCount < ECHO_URGENT_MAX_REPEATS) {
-        repeatCount++;
-        Serial.printf("[REPEAT] Playing alert repeat %u / %u\n", repeatCount, ECHO_URGENT_MAX_REPEATS);
-        buildPattern(activeAlertKind, activeAlertArg);
-        nextRepeatMs = now + ECHO_URGENT_REPEAT_MS;
+    // 60-second safety cutoff
+    if (now - alertStartMs > ECHOBAND_SAFETY_CUTOFF_MS) {
+      Serial.println("[REPEAT] Safety cutoff reached (60s). Stopping repeat.");
+      isRepeating = false;
+    } else if (now >= nextRepeatMs) {
+      if (activeType == ALERT_URGENT || currentProfile == PROFILE_DEAFBLIND) {
+        // Urgent & Deafblind repeat every 5s until ACK (capped at 6 repeats)
+        if (repeatCount < ECHOBAND_MAX_REPEATS) {
+          repeatCount++;
+          Serial.printf("[REPEAT] Playing repeat %u / %u\n", repeatCount, ECHOBAND_MAX_REPEATS);
+          buildPattern(activeType, activeArg);
+          nextRepeatMs = now + ECHOBAND_URGENT_REPEAT_MS;
+        } else {
+          isRepeating = false;
+        }
       } else {
-        isRepeating = false; // Cap reached
+        // Other alerts: one single replay after 5s if unacknowledged
+        if (repeatCount < 1) {
+          repeatCount++;
+          Serial.println("[REPLAY] Replaying alert once after 5s unconfirmed.");
+          buildPattern(activeType, activeArg);
+        }
+        isRepeating = false;
       }
     }
   }
@@ -421,7 +413,7 @@ void loop() {
     checkMPU6050();
   }
 
-  // 4. Profile Button
+  // 4. Profile Button Check (Debounced)
   bool reading = digitalRead(PIN_BTN_PROFILE);
   if (reading != lastProfileBtnState) {
     lastProfileBtnDebounce = now;
@@ -433,11 +425,57 @@ void loop() {
   }
   lastProfileBtnState = reading;
 
-  // 5. Heartbeat HELLO (Every 5 seconds)
-  if (now - lastHelloMs >= ECHO_HELLO_INTERVAL_MS) {
-    lastHelloMs = now;
-    sendPacket(K_HELLO, 0);
+  // 5. USB Serial CLI Parser
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (serialBuffer.length() > 0) {
+        processSerialLine(serialBuffer);
+        serialBuffer = "";
+      }
+    } else {
+      serialBuffer += c;
+    }
   }
+
+  delay(5);
+}
+
+// --- Command Processor (BLE & Serial) ---
+void processCommand(uint8_t type, uint8_t arg, uint8_t msgId) {
+  if (type == ALERT_STOP) {
+    Serial.println("[CMD] STOP received. Cancelling pattern.");
+    clearQueue();
+    isAlertPlaying = false;
+    isRepeating    = false;
+    activeType     = ALERT_STOP;
+    return;
+  }
+
+  // Ignore repeated same msgId
+  if (msgId != 0 && msgId == activeMsgId) {
+    Serial.printf("[CMD] Duplicate msgId %u ignored.\n", msgId);
+    return;
+  }
+
+  activeType     = type;
+  activeArg      = arg;
+  activeMsgId    = msgId;
+  alertStartMs   = millis();
+  repeatCount    = 0;
+
+  // Notify Phone: RX <msgId>
+  char rxBuf[32];
+  snprintf(rxBuf, sizeof(rxBuf), "RX %u", msgId);
+  notifyStatus(rxBuf);
+  Serial.printf("[STATUS NOTIFY] %s\n", rxBuf);
+
+  // Build pattern
+  buildPattern(activeType, activeArg);
+
+  // Setup repeat
+  isRepeating  = true;
+  nextRepeatMs = millis() + ECHOBAND_URGENT_REPEAT_MS;
 }
 
 // --- MPU6050 Raw I2C Implementation ---
@@ -462,7 +500,7 @@ bool initMPU6050() {
 
 void checkMPU6050() {
   Wire.beginTransmission(MPU6050_ADDR);
-  Wire.write(0x3B); // ACCEL_XOUT_H
+  Wire.write(0x3B);
   if (Wire.endTransmission(false) != 0) return;
 
   if (Wire.requestFrom((uint8_t)MPU6050_ADDR, (uint8_t)6) != 6) return;
@@ -478,40 +516,34 @@ void checkMPU6050() {
   float mag = sqrt(ax * ax + ay * ay + az * az);
 
   uint32_t now = millis();
-
-  // Lockout check
   if (now - lastDoubleTapMs < TAP_LOCKOUT_MS) return;
 
-  // Threshold spike check
   if (mag >= TAP_G_THRESH) {
     if (firstTapMs == 0) {
-      // First spike
       firstTapMs = now;
     } else {
-      // Second spike
       uint32_t dt = now - firstTapMs;
       if (dt >= TAP_MIN_GAP_MS && dt <= TAP_MAX_GAP_MS) {
-        // Confirmed Double-Tap!
         lastDoubleTapMs = now;
         firstTapMs = 0;
-        Serial.printf("[TAP] Double-Tap detected! (dt=%u ms, mag=%.2fg)\n", dt, mag);
+        Serial.printf("[TAP] Double-Tap confirmed! (dt=%u ms, mag=%.2fg)\n", dt, mag);
 
-        // Acknowledge alert
-        if (lastMsgId > 0) {
-          sendPacket(K_ACKED, lastMsgId);
-          isRepeating = false;
-          clearQueue();
+        // Acknowledge alert!
+        isRepeating = false;
+        clearQueue();
 
-          // Confirm tap on M1 + blink
-          appendTap(0, 150, 100, PIN_LED_BLUE);
-        }
+        char ackBuf[32];
+        snprintf(ackBuf, sizeof(ackBuf), "ACK %u", activeMsgId);
+        notifyStatus(ackBuf);
+        Serial.printf("[STATUS NOTIFY] %s\n", ackBuf);
+
+        // Confirmation tap on M1 + blink
+        appendTap(0, 150, 100, PIN_LED_BLUE);
       } else if (dt > TAP_MAX_GAP_MS) {
-        // Too slow, restart first tap
         firstTapMs = now;
       }
     }
   } else if (firstTapMs > 0 && (now - firstTapMs > TAP_MAX_GAP_MS)) {
-    // Window expired without second spike
     firstTapMs = 0;
   }
 }
@@ -524,7 +556,12 @@ void cycleProfile() {
   prefs.putUChar("profile", currentProfile);
   prefs.end();
 
-  Serial.printf("[PROFILE] Switched to %u (0:Deaf, 1:Deafblind, 2:Blind, 3:Language)\n", currentProfile);
+  const char* pName = getProfileName(currentProfile);
+  Serial.printf("[PROFILE] Switched to %s (%u)\n", pName, currentProfile);
+
+  char profBuf[32];
+  snprintf(profBuf, sizeof(profBuf), "PROFILE %s", pName);
+  notifyStatus(profBuf);
 
   clearQueue();
   // Feedback tap + blink count
@@ -533,26 +570,48 @@ void cycleProfile() {
   }
 }
 
-// --- Packet Transmission ---
-void sendPacket(uint8_t kind, uint16_t mId) {
-  EchoPacket pkt;
-  pkt.magic  = ECHO_MAGIC;
-  pkt.kind   = kind;
-  pkt.type   = 0;
-  pkt.arg    = 0;
-  pkt.msgId  = mId;
-  pkt.bandId = bandId;
-
-  const uint8_t *target = hasStationMac ? stationMac : broadcastMac;
-
-  // Ensure station peer exists in ESP-NOW
-  if (hasStationMac && !esp_now_is_peer_exist(stationMac)) {
-    esp_now_peer_info_t peerInfo = {};
-    memcpy(peerInfo.peer_addr, stationMac, 6);
-    peerInfo.channel = ECHO_WIFI_CHANNEL;
-    peerInfo.encrypt = false;
-    esp_now_add_peer(&peerInfo);
+const char* getProfileName(uint8_t p) {
+  switch (p) {
+    case PROFILE_DEAF:      return PROFILE_NAME_DEAF;
+    case PROFILE_DEAFBLIND: return PROFILE_NAME_DEAFBLIND;
+    case PROFILE_BLIND:     return PROFILE_NAME_BLIND;
+    case PROFILE_LANGUAGE:  return PROFILE_NAME_LANGUAGE;
+    default:                return "UNKNOWN";
   }
+}
 
-  esp_now_send(target, (const uint8_t*)&pkt, sizeof(EchoPacket));
+void notifyStatus(const char* line) {
+  if (bleConnected && pStatusChar) {
+    pStatusChar->setValue((uint8_t*)line, strlen(line));
+    pStatusChar->notify();
+  }
+}
+
+// --- Serial CLI Handler ---
+void processSerialLine(String line) {
+  line.trim();
+  if (line.equalsIgnoreCase("P")) {
+    cycleProfile();
+    return;
+  }
+  if (line.equalsIgnoreCase("STATUS")) {
+    Serial.printf("State: activeType=%u, msgId=%u, profile=%s, ble=%s\n",
+      activeType, activeMsgId, getProfileName(currentProfile), bleConnected ? "CONNECTED" : "DISCONNECTED");
+    return;
+  }
+  if (line.startsWith("A ") || line.startsWith("a ")) {
+    int s1 = line.indexOf(' ');
+    int s2 = line.indexOf(' ', s1 + 1);
+    int s3 = (s2 != -1) ? line.indexOf(' ', s2 + 1) : -1;
+
+    uint8_t type  = line.substring(s1 + 1, (s2 != -1) ? s2 : line.length()).toInt();
+    uint8_t arg   = (s2 != -1) ? line.substring(s2 + 1, (s3 != -1) ? s3 : line.length()).toInt() : 0;
+    static uint8_t serialMsgSeq = 100;
+    uint8_t msgId = (s3 != -1) ? line.substring(s3 + 1).toInt() : serialMsgSeq++;
+
+    Serial.printf("[SERIAL CLI] Parsed alert: type=%u, arg=%u, msgId=%u\n", type, arg, msgId);
+    processCommand(type, arg, msgId);
+    return;
+  }
+  Serial.println("Commands: 'A <type> <arg> [msgId]' (e.g. 'A 1 2'), 'P' (Cycle Profile), 'STATUS'");
 }

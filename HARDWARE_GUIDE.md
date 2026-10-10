@@ -1,153 +1,257 @@
-# EchoBand — Hardware & Wiring Guide
+# EchoBand — The Complete Hardware & Assembly Master Guide
 **Project:** EchoBand ("One Message, Every Sense")  
 **Target:** HACK'TVM 2026 (Deadline: 3:00 PM IST)  
-**Audience:** Hardware Assembly Lead  
+**System Architecture:** **Single-Board (ONE ESP32 Band, Zero Station Infrastructure)**  
 
 ---
 
-## 1. Pre-Build Sanity & Parts Check
-
-Before stripping wires or mounting anything, verify these items against your desk:
-
-| Item | Required Qty | Status / Crucial Action |
-| :--- | :--- | :--- |
-| **ESP32 Dev Board** | **2 units** | **CRITICAL:** You need 1 board for the Station and 1 board for the Band. (The Arduino UNO R4 WiFi on the desk is **NOT** used). |
-| **SG90 Micro Servos** | **4 units** | Used as haptic tappers ($M1$ to $M4$). If your kit only has 3, **request a 4th servo from the organizers right away**. |
-| **L298N Driver Board** | 1 unit | Used **strictly as a 5V regulated power supply**, NOT for driving motors. |
-| **MPU6050 Module** | 1 unit | Accelerometer for double-tap acknowledgment ($I^2C$ address `0x68`). |
-| **9V Battery & Clip** | 1 unit | Powers the servo rail via the L298N. |
-| **Push Buttons** | 5 units | 4 for Station presets, 1 for Band profile selector. |
-| **Active Buzzer** | 1 unit | For the Band (Blind profile audio rhythm). |
-| **Colored LEDs** | 4 units | Blue (Platform), Yellow/Orange (Delay), Green (Boarding), Red (Urgent). |
-| **220 Ω Resistors** | 4 units | Color code: **Red-Red-Brown-Gold**. (Do **NOT** use 220 kΩ: Red-Red-Yellow-Gold). |
-| **Parts to Put Away** | — | **Do NOT wire:** Ultrasonic sensors (HC-SR04), Soil sensor, GPS, RFID tags. Store them away to avoid clutter. |
+## 0. The Pivot: What Changed?
+* **Zero Infrastructure:** There is **NO station board**, **NO second ESP32**, and **NO ESP-NOW**. 
+* The **wearer's smartphone** handles all speech listening, display, and AI.
+* Your job is to build **ONE perfect wearable armband unit** containing **1 ESP32**, 4 servos, MPU6050, buzzer, LEDs, and the L298N regulator.
 
 ---
 
-## 2. Power Architecture & The Common Ground Rule
+## 1. Visual Parts Identification & Pre-Check
+
+Before picking up a screwdriver or wire stripper, verify each component:
+
+### 1.1 Parts You MUST Have on Your Desk:
+1. **ESP32 Dev Board (Qty: 1):** 30-pin or 38-pin ESP32 NodeMCU/DevKit.
+2. **SG90 Micro Servos (Qty: 4):**
+   * Three wires per servo: **Brown** = Ground (GND), **Red** = 5V Power (VCC), **Orange/Yellow** = PWM Signal.
+   * 4 single straight plastic horns (arms) and mounting screws.
+3. **L298N Motor Driver Board (Qty: 1):** Used strictly as a **5V voltage regulator**, NOT to drive motors.
+4. **MPU6050 Accelerometer / Gyroscope (Qty: 1):** Blue GY-521 breakout board with 8 pins (VCC, GND, SCL, SDA, XDA, XCL, AD0, INT).
+5. **Active Buzzer (Qty: 1):** Has a sticker on top and two pins (Longer pin = `+`, Shorter pin = `-`).
+6. **Colored 5mm LEDs (Qty: 4):**
+   * 1x Blue (Platform)
+   * 1x Orange/Yellow (Delay)
+   * 1x Green (Departure)
+   * 1x Red (Urgent / Cancel)
+   * *Pin identification:* **Long leg = Anode (+)**, **Short leg / flat rim edge = Cathode (-)**.
+7. **220 Ω Resistors (Qty: 4):**
+   * **Color Bands:** **RED — RED — BROWN — GOLD** (220 Ω).
+   * ⚠️ **DO NOT USE 220 kΩ:** RED — RED — YELLOW — GOLD (LEDs will not light up!).
+8. **Tactile Push Button (Qty: 1):** For the profile switcher.
+9. **9V Battery & Battery Clip (Qty: 1):** Heavy-duty 9V block battery.
+10. **Breadboard & Jumper Wires:** Male-to-Male (M-M) and Male-to-Female (M-F) jumpers.
+
+### 1.2 Parts to Put Away (Do NOT use):
+* Ultrasonic sensors (HC-SR04), Soil sensor, Arduino Uno R4 WiFi, GPS, RFID modules. Put them back in the kit box so they don't cause confusion.
+
+---
+
+## 2. Power Architecture: The L298N 5V Regulator Setup
 
 > [!CAUTION]
-> **#1 Hackathon Failure Mode: Ground Loops & Power Starvation**
-> * Servos draw peak surge currents that will brown out or fry an ESP32 if powered from its 3.3V or 5V pin.
-> * Never power SG90 servos from ESP32 pins.
-> * **ALL grounds must be tied together into a single common ground rail.**
+> **#1 Rule of Hardware at Hackathons: NEVER Power Servos from ESP32 Pins!**
+> The ESP32's onboard regulator can only output ~250 mA. An SG90 servo draws up to 500–800 mA during movement. If you power servos from the ESP32, the board will brown out, crash, or burn out its silicon.
 
 ```
-[9V Battery]
-    │ (+) Red lead
-    ▼
-[L298N 12V Screw Terminal]
-    │
-[L298N Board] ── (Ensure 5V-EN Jumper cap is ON!)
-    │
-    ├─► [+5V Screw Terminal] ──► Breadboard Servo Power Rail (+5V)
-    │                                └─► Also to Band ESP32 VIN (optional untethered)
-    │
-    └─► [GND Screw Terminal] ──► COMMON GROUND RAIL
-                                     ├─► 9V Battery (-) Black lead
-                                     ├─► Band ESP32 GND
-                                     ├─► All 4 Servos GND (Brown/Black wires)
-                                     ├─► MPU6050 GND
-                                     └─► Buzzer / LED GNDs
+       [9V Battery]
+       (+) Red wire ──► L298N "+12V" Screw Terminal
+       (-) Black wire ─► L298N "GND" Screw Terminal
+                              │
+                    [L298N Regulator Board]
+                    (5V-EN Jumper MUST BE ON!)
+                              │
+          ┌───────────────────┴───────────────────┐
+          ▼                                       ▼
+  L298N "+5V" Terminal                    L298N "GND" Terminal
+          │                                       │
+          ▼                                       ▼
+BREADBOARD RED RAIL (+5V)               BREADBOARD BLUE RAIL (GND)
+(Powers all 4 Servos & ESP32 VIN)       (COMMON REFERENCE GROUND)
+                                                  │
+                                 ┌────────────────┼────────────────┐
+                                 ▼                ▼                ▼
+                            ESP32 GND        Servos GND       MPU6050 GND
 ```
 
-### L298N Setup as a 5V Regulator:
-1. Connect the **9V battery positive (+)** to the L298N screw terminal labeled **`+12V`** (or `VMS`).
-2. Connect the **9V battery negative (-)** to the L298N screw terminal labeled **`GND`**.
-3. **Check the 5V jumper:** Ensure the two-pin jumper cap behind the screw terminals labeled **`5V-EN`** is in place.
-4. Take your servo power from the L298N terminal labeled **`+5V`**. This powers the SG90 servo VCC rail.
-5. *Firmware Safety:* Software is hard-coded to fire only **one servo at a time** with a 50 ms stagger to keep current consumption well within the regulator's 0.5 A limit.
+### Exact Terminal Block Connections on the L298N:
+The L298N has a green 3-terminal screw block on one side:
+1. **Left Terminal (`+12V` or `VMS`):** Insert the **Red (+) lead** of your 9V battery clip. Tighten the screw.
+2. **Middle Terminal (`GND`):** 
+   * Insert the **Black (-) lead** of your 9V battery clip.
+   * ALSO insert a jumper wire here that runs to your **Breadboard Ground (Blue) Rail**.
+   * Tighten the screw firmly.
+3. **Right Terminal (`+5V`):** Insert a jumper wire that runs to your **Breadboard Power (Red) Rail**. Tighten the screw.
+4. **The 5V Enable Jumper:** Look directly behind the 3 screw terminals. There is a 2-pin header with a black jumper cap labeled **5V-EN**. **LEAVE THIS JUMPER ON**. This enables the onboard 78M05 voltage regulator to step down 9V to a stable 5V.
 
 ---
 
-## 3. Unit A: Station Board (Build First — Fast & Simple)
+## 3. Step-by-Step Breadboard Wiring Walkthrough
 
-The Station receives inputs from operator buttons or the phone (via BLE / USB Serial) and broadcasts them over ESP-NOW.
+Follow these steps in exact sequential order:
 
-* **Power:** Powered directly from Laptop USB.
-* **Buttons (Internal Pull-Up):** Wire one leg of each button to the GPIO pin, and the opposite leg to **GND**.
+```
++--------------------------------------------------------------------------+
+|  RED POWER RAIL   (+5V from L298N)  ==> All Servo Red Wires, ESP32 VIN   |
+|  BLUE GROUND RAIL (COMMON GND)      ==> L298N GND, ESP32 GND, All GNDs   |
++--------------------------------------------------------------------------+
+```
 
-| Component | ESP32 GPIO | Wiring Note |
+### Step 1: Establish the Common Ground & Power Rails
+1. Connect the **L298N `+5V`** wire to the **Red (+) rail** of the breadboard.
+2. Connect the **L298N `GND`** wire to the **Blue (-) rail** of the breadboard.
+3. Connect one of the **ESP32 GND pins** to the **Blue (-) rail**.
+4. *(Optional Untethered Power):* Connect the **ESP32 `VIN` (or `5V`) pin** to the **Red (+) rail**.  
+   *Note: While developing at your laptop, leave ESP32 plugged into USB. The common ground between USB and L298N MUST still be connected!*
+
+---
+
+### Step 2: Wire the 4 SG90 Servos ($M1, M2, M3, M4$)
+Each servo has a 3-pin female connector (Brown, Red, Orange). Use Male-to-Male jumper wires:
+
+| Servo | Purpose / Signal | Red Wire (Power) | Brown Wire (Ground) | Orange Wire (Signal) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Servo $M1$** | Attention / Platform | Breadboard Red Rail (+5V) | Breadboard Blue Rail (GND) | **ESP32 `GPIO 18`** |
+| **Servo $M2$** | Platform Count / Delay | Breadboard Red Rail (+5V) | Breadboard Blue Rail (GND) | **ESP32 `GPIO 19`** |
+| **Servo $M3$** | Boarding / Departure | Breadboard Red Rail (+5V) | Breadboard Blue Rail (GND) | **ESP32 `GPIO 23`** |
+| **Servo $M4$** | Urgent / Cancel | Breadboard Red Rail (+5V) | Breadboard Blue Rail (GND) | **ESP32 `GPIO 25`** |
+
+> [!NOTE]
+> *Software Safety:* The firmware is hard-coded to energize **only ONE servo at a time** with a 50 ms delay between taps. This prevents current spikes from tripping the L298N regulator.
+
+---
+
+### Step 3: Wire the MPU6050 Accelerometer
+The MPU6050 communicates with the ESP32 via $I^2C$:
+
+| MPU6050 Pin | ESP32 Connection | Why? |
 | :--- | :--- | :--- |
-| **Button 1 (Platform)** | `GPIO 32` | One pin to GPIO 32, other pin to GND |
-| **Button 2 (Delay)** | `GPIO 33` | One pin to GPIO 33, other pin to GND |
-| **Button 3 (Departure)** | `GPIO 25` | One pin to GPIO 25, other pin to GND |
-| **Button 4 (Urgent)** | `GPIO 26` | One pin to GPIO 26, other pin to GND |
-| *(Optional) Station Buzzer* | `GPIO 27` | Positive to GPIO 27, Negative to GND |
+| **VCC** | ESP32 **`3.3V`** pin | Power (GY-521 modules operate cleanly at 3.3V) |
+| **GND** | Breadboard **Blue Rail (GND)** | Common ground |
+| **SCL** | ESP32 **`GPIO 22`** | $I^2C$ Clock line |
+| **SDA** | ESP32 **`GPIO 21`** | $I^2C$ Data line |
+| **AD0** | Breadboard **Blue Rail (GND)** | **CRITICAL:** Pulling AD0 to GND locks the $I^2C$ address to `0x68` |
+| *INT / XDA / XCL*| *Leave Disconnected* | Not used |
 
 ---
 
-## 4. Unit B: Wearable Band (High Precision Assembly)
-
-### 4.1 SG90 Servo Actuators ($M1, M2, M3, M4$)
-* **Wiring:**
-  * **Red Wire (VCC):** Connected to the L298N regulated +5V rail.
-  * **Brown / Black Wire (GND):** Connected to Common Ground.
-  * **Orange / Yellow Wire (Signal):** Connected directly to ESP32:
-    * **$M1$:** `GPIO 18`
-    * **$M2$:** `GPIO 19`
-    * **$M3$:** `GPIO 23`
-    * **$M4$:** `GPIO 25`
-* **Mechanical Placement:**
-  * Mount servos along the armband or wrist mount in a sequential line: $M1 \to M2 \to M3 \to M4$.
-  * Attach a single straight plastic arm (horn) to each servo.
-  * **Rest Position:** The arm sits slightly back. During a signal, it swings 30° to 40° to gently poke/tap the skin, then returns.
-  * **Mechanical Clearance:** Ensure no servo horn is mechanically blocked or jammed against a rigid surface; stalling draws > 800 mA and can damage the motor.
-
-### 4.2 MPU6050 Accelerometer (Double-Tap Recognition)
-* **Wiring ($I^2C$):**
-  * **VCC:** ESP32 `3.3V` (GY-521 modules have an onboard 3.3V regulator).
-  * **GND:** Common Ground.
-  * **SDA:** `GPIO 21`
-  * **SCL:** `GPIO 22`
-  * **AD0:** Must be connected to **GND** (locks $I^2C$ address to `0x68`).
-* **Mounting Requirement:**
-  * Must be **firmly strapped or taped to the rigid part of the armband**.
-  * If the sensor hangs loosely on jumper wires, the double-tap acceleration threshold ($> 2.5\,\text{g}$) will not trigger.
-
-### 4.3 Profile Push Button
-* Cycles profiles: Deaf $\to$ Deafblind $\to$ Blind $\to$ Language.
-* One leg to **`GPIO 4`**, opposite leg to **GND** (software `INPUT_PULLUP`).
-
-### 4.4 Active Buzzer (Blind Profile)
-* Positive pin (+) $\to$ **`GPIO 26`**.
-* Negative pin (-) $\to$ **GND**.
-
-### 4.5 Deaf Profile Status LEDs
-* Cathode (short leg) to **GND**.
-* Anode (long leg) through a **220 Ω resistor** to the GPIO:
-  * **Blue LED (Platform):** `GPIO 13`
-  * **Orange/Yellow LED (Delay):** `GPIO 14`
-  * **Green LED (Departure):** `GPIO 27`
-  * **Red LED (Urgent):** `GPIO 33`
+### Step 4: Wire the Profile Push Button
+This button allows the wearer to cycle through profiles (Deaf $\to$ Deafblind $\to$ Blind $\to$ Language):
+* Place the tactile push button across the center divider of the breadboard.
+* Connect **Leg 1** to **ESP32 `GPIO 4`**.
+* Connect **Leg 2** directly to **Breadboard Blue Rail (GND)**.
+* *(No external resistor needed: ESP32 uses internal software `INPUT_PULLUP`).*
 
 ---
 
-## 5. Master Band Pinout Quick-Reference
+### Step 5: Wire the Active Buzzer (Blind Profile)
+* Connect the **Positive pin (`+` or longer leg)** to **ESP32 `GPIO 26`**.
+* Connect the **Negative pin (`-` or shorter leg)** to **Breadboard Blue Rail (GND)**.
 
-| Pin / Line | Device Connected | Wire Color / Terminal | Description |
+---
+
+### Step 6: Wire the 4 Status LEDs (Deaf Profile)
+Each LED has a 220 Ω current-limiting resistor (Color code: Red-Red-Brown-Gold):
+
+```
+ESP32 GPIO ──► [220 Ω Resistor] ──► LED Anode (Long Leg) ──► LED Cathode (Short Leg) ──► GND Rail
+```
+
+| LED Color | Meaning | Resistor | ESP32 GPIO Pin |
 | :--- | :--- | :--- | :--- |
-| `GPIO 18` | Servo $M1$ | Signal (Orange/Yellow) | Wave lead / Platform prefix tap |
-| `GPIO 19` | Servo $M2$ | Signal (Orange/Yellow) | Platform number taps / Delay tap |
-| `GPIO 23` | Servo $M3$ | Signal (Orange/Yellow) | Boarding / Departure long tap |
-| `GPIO 25` | Servo $M4$ | Signal (Orange/Yellow) | Urgent alert rapid taps |
-| `GPIO 21` | MPU6050 SDA | Jumper | $I^2C$ Data |
-| `GPIO 22` | MPU6050 SCL | Jumper | $I^2C$ Clock |
-| `GPIO 4`  | Profile Button | Jumper to Switch | Mode switch (Deaf / Blind / etc.) |
-| `GPIO 26` | Active Buzzer | Buzzer (+) | Acoustic rhythm for blind profile |
-| `GPIO 13` | Blue LED | Anode via 220 Ω | Platform visual indicator |
-| `GPIO 14` | Orange/Yellow LED | Anode via 220 Ω | Delay visual indicator |
-| `GPIO 27` | Green LED | Anode via 220 Ω | Departure visual indicator |
-| `GPIO 33` | Red LED | Anode via 220 Ω | Urgent visual indicator |
-| `L298N 5V` | All 4 Servos VCC | Servo Red wires | Regulated servo power rail |
-| `GND` | All Components | Brown / Black wires | Common reference ground |
+| **Blue LED** | Platform Alert | 220 Ω | **`GPIO 13`** |
+| **Orange / Yellow LED** | Train Delay | 220 Ω | **`GPIO 14`** |
+| **Green LED** | Departure / Boarding | 220 Ω | **`GPIO 27`** |
+| **Red LED** | Urgent Alert / Cancel | 220 Ω | **`GPIO 33`** |
 
 ---
 
-## 6. Pre-Power-On Checklist (Avoid Magic Smoke)
+## 4. Master GPIO Pinout Table
 
-1. [ ] **Resistor Verification:** Check the LED resistors with a multimeter or color code. Confirm they are 220 Ω (Red-Red-Brown-Gold) and not 220 kΩ.
-2. [ ] **No 9V to ESP32:** Confirm the 9V battery leads connect ONLY to the L298N terminal block, never directly to the ESP32.
-3. [ ] **L298N Jumper:** Check that the 5V-EN jumper cap is securely plugged in.
-4. [ ] **Continuity & Ground Check:** Verify continuity between all ground points (Battery (-), L298N GND, ESP32 GND, Servo GNDs, MPU6050 GND).
-5. [ ] **Brownout Mitigation:** Standard 9V alkaline block batteries suffer steep voltage drops under load. Keep a micro-USB cable handy to power the Band ESP32 logic independently while testing servos with the 9V battery.
+Print or screenshot this table for instant reference:
+
+| ESP32 Pin | Connected Component | Wire / Leg | Function |
+| :---: | :--- | :--- | :--- |
+| **`GPIO 18`** | Servo $M1$ | Orange wire | Attention wave leader / Platform marker tap |
+| **`GPIO 19`** | Servo $M2$ | Orange wire | Platform count taps / Delay alert taps |
+| **`GPIO 23`** | Servo $M3$ | Orange wire | Departure long tap |
+| **`GPIO 25`** | Servo $M4$ | Orange wire | Urgent rapid taps / Cancel tap |
+| **`GPIO 21`** | MPU6050 SDA | Jumper | $I^2C$ Data line |
+| **`GPIO 22`** | MPU6050 SCL | Jumper | $I^2C$ Clock line |
+| **`GPIO 4`**  | Profile Switch | Button Pin 1 | Cycle Deaf/Deafblind/Blind/Language |
+| **`GPIO 26`** | Active Buzzer | Buzzer (+) | Acoustic rhythm for blind profile |
+| **`GPIO 13`** | Blue LED | Anode via 220 Ω | Platform visual indicator |
+| **`GPIO 14`** | Orange/Yellow LED | Anode via 220 Ω | Delay visual indicator |
+| **`GPIO 27`** | Green LED | Anode via 220 Ω | Departure visual indicator |
+| **`GPIO 33`** | Red LED | Anode via 220 Ω | Urgent visual indicator |
+| **`3.3V`**    | MPU6050 VCC | Jumper | 3.3V sensor logic power |
+| **`GND`**     | Common Ground Rail | Jumper | Universal circuit ground |
+| **`VIN`**     | L298N +5V Rail | Jumper | Untethered board power |
+
+---
+
+## 5. Mechanical Armband Assembly (The Physical Wearable)
+
+```
+        Wrist Strap / Armband Mount
+  +---------------------------------------+
+  |  [M1]     [M2]     [M3]     [M4]      |   <-- 4 Servos in a sequential line
+  |   │        │        │        │        |
+  |  ( )      ( )      ( )      ( )       |   <-- Single horn on each servo
+  |                                       |
+  |             [ MPU6050 ]               |   <-- Firmly taped to rigid strap
+  +---------------------------------------+
+```
+
+1. **Servo Arrangement:**
+   * Align the 4 servos in a straight sequential row on a cardboard backing, velcro strap, or 3D-printed band: $M1 \to M2 \to M3 \to M4$.
+   * Spacing: roughly 2 to 3 cm apart.
+2. **Servo Horns (Tappers):**
+   * Attach a single straight arm (horn) to each servo.
+   * **Rest Position:** The horn points sideways / retracted away from the wrist.
+   * **Active Tap Position:** During a tap, the servo swings 35° inward so the tip of the plastic arm taps/pokes against the skin, then immediately snaps back.
+   * **Clearance Check:** Ensure the horn does not physically hit the table or jam against the band frame. A stalled SG90 servo pulls > 800 mA and gets hot!
+3. **Rigid MPU6050 Mounting (CRUCIAL):**
+   * The MPU6050 **must be firmly taped or strapped to the rigid structure of the band**.
+   * If the sensor hangs loosely by its jumper wires, wrist double-taps will NOT transfer kinetic energy to the accelerometer, and double-tap detection will fail!
+
+---
+
+## 6. Pre-Flight Bench Test (Verify Before Strapping On)
+
+Once assembled, do these 4 quick bench tests to verify everything is 100% functional:
+
+### Test 1: Power-On Twitch Test
+1. Connect the ESP32 to your laptop via USB.
+2. Connect the 9V battery to the L298N.
+3. On boot, Servo $M1$ will give **one quick confirmation tap** (100 ms). If $M1$ moves, your power and servo signal are working!
+
+### Test 2: Serial CLI Command Test (No Phone Needed!)
+1. Open the Arduino Serial Monitor at **115200 baud**.
+2. Type `A 1 2` and press Enter:
+   * You will see the Attention wave: $M1 \to M2 \to M3 \to M4$ swing sequentially.
+   * Then $M1$ gives a long tap, followed by two short taps on $M2$ (Platform 2).
+   * Then the reverse wave $M4 \to M3 \to M2 \to M1$ signals message completed.
+   * Blue LED lights up during the alert.
+3. Type `P` and press Enter:
+   * Profile cycles to DEAFBLIND $\to$ BLIND $\to$ LANGUAGE.
+   * Green LED blinks to confirm.
+
+### Test 3: Double-Tap Acknowledgment Test
+1. Type `A 4 0` in the Serial Monitor (Urgent alert).
+2. Servo $M4$ will rapidly tap 3 times and Red LED will flash. It repeats every 5 seconds.
+3. Double-tap firmly with your fingers directly on the MPU6050 board.
+4. Serial Monitor will print: `[TAP] Double-Tap confirmed!` and the pattern will immediately stop!
+
+### Test 4: Web Bluetooth Phone Test
+1. Open Chrome on Android: navigate to your deployed GitHub Pages URL (or laptop Chrome using the Mock/Serial transport).
+2. Tap **Connect** $\to$ Select **EchoBand**.
+3. Tap **Platform Alert** on the phone screen.
+4. Watch the band play the tactile wave, then double-tap the sensor. The phone will instantly show **`ACKNOWLEDGED`**!
+
+---
+
+## 7. Troubleshooting Cheatsheet
+
+| Issue | Cause | Fix |
+| :--- | :--- | :--- |
+| **Servos jitter or hum loudly** | Floating ground | Ensure the L298N `GND`, ESP32 `GND`, and Servo `Brown` wires are firmly seated in the common ground rail. |
+| **ESP32 reboots when servo moves** | 9V battery voltage sag | 9V alkaline batteries drop voltage under heavy load. Keep the laptop USB plugged into the ESP32 for logic power while the 9V battery powers the servos. |
+| **MPU6050 not detected (`0x68`)** | Loose I2C wires or floating AD0 | Verify `SDA` is in `GPIO 21`, `SCL` is in `GPIO 22`, and `AD0` is tied directly to `GND`. |
+| **LED does not light up** | Reversed polarity or wrong resistor | Swap the LED legs (long leg must go to resistor/GPIO). Verify resistor color code is Red-Red-Brown (220 Ω) and NOT Red-Red-Yellow (220 kΩ). |
+| **Double-tap doesn't register** | Sensor hanging loose | Securely tape the MPU6050 to the armband frame so physical wrist taps create sharp G-force shockwaves. |

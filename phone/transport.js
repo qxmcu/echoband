@@ -1,9 +1,11 @@
 // transport.js — Unified communication transport layer for EchoBand
-// Supports: Web Bluetooth (Phone Chrome), Web Serial (Laptop Chrome), and Mock (Offline simulation)
+// Direct connection to EchoBand over Web Bluetooth, Web Serial, and Mock Simulator
 
-const BLE_SERVICE_UUID     = '0000ec00-0000-1000-8000-00805f9b34fb';
-const BLE_CHAR_WRITE_UUID  = '0000ec01-0000-1000-8000-00805f9b34fb';
-const BLE_CHAR_NOTIFY_UUID = '0000ec02-0000-1000-8000-00805f9b34fb';
+import {
+  ECHOBAND_SERVICE_UUID,
+  ECHOBAND_CHAR_COMMAND_UUID,
+  ECHOBAND_CHAR_STATUS_UUID
+} from './protocol.js';
 
 export class BaseTransport {
   constructor() {
@@ -33,58 +35,60 @@ export class BaseTransport {
 
   async connect() { throw new Error('Not implemented'); }
   async disconnect() { throw new Error('Not implemented'); }
-  async send(type, arg) { throw new Error('Not implemented'); }
+  async send(type, arg, msgId) { throw new Error('Not implemented'); }
 }
 
 /**
- * Web Bluetooth Transport (Android Chrome)
+ * Web Bluetooth Transport (Android Chrome directly to EchoBand)
  */
 export class BleTransport extends BaseTransport {
   constructor() {
     super();
     this.device = null;
     this.server = null;
-    this.writeChar = null;
-    this.notifyChar = null;
+    this.cmdChar = null;
+    this.statusChar = null;
   }
 
   async connect() {
     if (!navigator.bluetooth) {
-      throw new Error('Web Bluetooth is not supported on this browser (Use Chrome on Android).');
+      throw new Error('Web Bluetooth is not supported on this browser. Use Chrome on Android over HTTPS.');
     }
 
-    console.log('[BLE] Requesting Bluetooth Device...');
+    console.log('[BLE] Requesting EchoBand Bluetooth Device...');
     this.device = await navigator.bluetooth.requestDevice({
-      filters: [{ name: 'EchoStation' }],
-      optionalServices: [BLE_SERVICE_UUID]
+      filters: [{ name: 'EchoBand' }],
+      optionalServices: [ECHOBAND_SERVICE_UUID]
     });
 
     this.device.addEventListener('gattserverdisconnected', () => {
       this.connected = false;
-      this.notifyStatus('msg=0 type=0 arg=0 bands=0 rx=0 ack=0 unconfirmed=DISCONNECTED');
-      console.log('[BLE] Device disconnected');
+      this.notifyStatus('STATUS DISCONNECTED');
+      console.log('[BLE] EchoBand disconnected');
     });
 
     console.log('[BLE] Connecting to GATT Server...');
     this.server = await this.device.gatt.connect();
 
-    console.log('[BLE] Getting Service...');
-    const service = await this.server.getPrimaryService(BLE_SERVICE_UUID);
+    console.log('[BLE] Getting EchoBand Service...');
+    const service = await this.server.getPrimaryService(ECHOBAND_SERVICE_UUID);
 
     console.log('[BLE] Getting Characteristics...');
-    this.writeChar = await service.getCharacteristic(BLE_CHAR_WRITE_UUID);
-    this.notifyChar = await service.getCharacteristic(BLE_CHAR_NOTIFY_UUID);
+    this.cmdChar = await service.getCharacteristic(ECHOBAND_CHAR_COMMAND_UUID);
+    this.statusChar = await service.getCharacteristic(ECHOBAND_CHAR_STATUS_UUID);
 
     // Subscribe to status notifications
-    await this.notifyChar.startNotifications();
-    this.notifyChar.addEventListener('characteristicvaluechanged', (event) => {
+    await this.statusChar.startNotifications();
+    this.statusChar.addEventListener('characteristicvaluechanged', (event) => {
       const decoder = new TextDecoder('utf-8');
-      const line = decoder.decode(event.target.value);
-      this.notifyStatus(line.trim());
+      const line = decoder.decode(event.target.value).trim();
+      console.log('[BLE RX Notify]', line);
+      this.notifyStatus(line);
     });
 
     this.connected = true;
-    console.log('[BLE] Connected successfully to EchoStation');
+    console.log('[BLE] Connected directly to EchoBand!');
+    this.notifyStatus('STATUS CONNECTED');
     return true;
   }
 
@@ -93,20 +97,22 @@ export class BleTransport extends BaseTransport {
       await this.device.gatt.disconnect();
     }
     this.connected = false;
+    this.notifyStatus('STATUS DISCONNECTED');
   }
 
-  async send(type, arg = 0) {
-    if (!this.connected || !this.writeChar) {
-      throw new Error('BLE Transport is not connected.');
+  async send(type, arg = 0, msgId = 1) {
+    if (!this.connected || !this.cmdChar) {
+      throw new Error('EchoBand is not connected.');
     }
-    const payload = new Uint8Array([type, arg]);
-    await this.writeChar.writeValue(payload);
-    console.log(`[BLE TX] Sent alert type=${type}, arg=${arg}`);
+    // 3 bytes [type, arg, msgId]
+    const payload = new Uint8Array([type & 0xFF, arg & 0xFF, msgId & 0xFF]);
+    await this.cmdChar.writeValue(payload);
+    console.log(`[BLE TX] Sent [type=${type}, arg=${arg}, msgId=${msgId}]`);
   }
 }
 
 /**
- * Web Serial Transport (Laptop Chrome fallback)
+ * Web Serial Transport (Laptop USB Chrome fallback)
  */
 export class SerialTransport extends BaseTransport {
   constructor() {
@@ -119,7 +125,7 @@ export class SerialTransport extends BaseTransport {
 
   async connect() {
     if (!navigator.serial) {
-      throw new Error('Web Serial is not supported on this browser (Use Chrome on desktop).');
+      throw new Error('Web Serial is not supported on this browser. Use Chrome on desktop.');
     }
 
     console.log('[Serial] Requesting Serial Port...');
@@ -133,7 +139,8 @@ export class SerialTransport extends BaseTransport {
     this.connected = true;
     this.keepReading = true;
     this.readLoop();
-    console.log('[Serial] Connected to ESP32 Serial at 115200 baud');
+    console.log('[Serial] Connected to EchoBand at 115200 baud');
+    this.notifyStatus('STATUS CONNECTED');
     return true;
   }
 
@@ -150,11 +157,13 @@ export class SerialTransport extends BaseTransport {
         if (value) {
           buffer += value;
           const lines = buffer.split('\n');
-          buffer = lines.pop(); // Keep partial line
+          buffer = lines.pop();
           for (const raw of lines) {
             const line = raw.trim();
-            if (line.startsWith('msg=')) {
-              this.notifyStatus(line);
+            if (line.length > 0) {
+              if (line.startsWith('RX ') || line.startsWith('ACK ') || line.startsWith('PROFILE ')) {
+                this.notifyStatus(line);
+              }
             }
           }
         }
@@ -163,6 +172,7 @@ export class SerialTransport extends BaseTransport {
       console.warn('[Serial] Reader ended:', err);
     } finally {
       this.connected = false;
+      this.notifyStatus('STATUS DISCONNECTED');
     }
   }
 
@@ -172,33 +182,33 @@ export class SerialTransport extends BaseTransport {
     if (this.writer) await this.writer.close();
     if (this.port) await this.port.close();
     this.connected = false;
+    this.notifyStatus('STATUS DISCONNECTED');
   }
 
-  async send(type, arg = 0) {
+  async send(type, arg = 0, msgId = 1) {
     if (!this.connected || !this.writer) {
       throw new Error('Serial Transport is not connected.');
     }
-    const cmd = `A ${type} ${arg}\n`;
+    const cmd = `A ${type} ${arg} ${msgId}\n`;
     await this.writer.write(cmd);
-    console.log(`[Serial TX] Sent command: ${cmd.trim()}`);
+    console.log(`[Serial TX] Sent: ${cmd.trim()}`);
   }
 }
 
 /**
- * Mock Transport (Zero hardware required — test in any browser)
+ * Mock Transport (Zero hardware simulator)
  */
 export class MockTransport extends BaseTransport {
   constructor() {
     super();
-    this.mockMsgId = 0;
     this.mockAckTimer = null;
   }
 
   async connect() {
     this.connected = true;
-    console.log('[Mock] Connected in Simulator Mode (Simulating Station & Band 0x4A)');
-    // Initial status
-    this.notifyStatus('msg=0 type=0 arg=0 bands=1 rx=0 ack=0 unconfirmed=NONE');
+    console.log('[Mock] Connected (Simulating EchoBand wearable)');
+    this.notifyStatus('STATUS CONNECTED');
+    this.notifyStatus('PROFILE DEAF');
     return true;
   }
 
@@ -206,25 +216,23 @@ export class MockTransport extends BaseTransport {
     this.connected = false;
     if (this.mockAckTimer) clearTimeout(this.mockAckTimer);
     console.log('[Mock] Disconnected');
+    this.notifyStatus('STATUS DISCONNECTED');
   }
 
-  async send(type, arg = 0) {
+  async send(type, arg = 0, msgId = 1) {
     if (!this.connected) throw new Error('Mock Transport is disconnected.');
 
-    this.mockMsgId++;
-    const currentId = this.mockMsgId;
+    console.log(`[Mock TX] Sent [type=${type}, arg=${arg}, msgId=${msgId}]`);
 
-    console.log(`[Mock TX] Alert sent -> msg=${currentId} type=${type} arg=${arg}`);
+    // 1. Instantly simulate Band reception
+    this.notifyStatus(`RX ${msgId}`);
 
-    // 1. Immediately simulate Station broadcast & Band reception
-    this.notifyStatus(`msg=${currentId} type=${type} arg=${arg} bands=1 rx=1 ack=0 unconfirmed=4A`);
-
-    // 2. After 3.5 seconds (wearer feels wave & double-taps), simulate Double-Tap ACK
+    // 2. After 3.5s (wearer feels wave & double-taps), simulate Double-Tap ACK
     if (this.mockAckTimer) clearTimeout(this.mockAckTimer);
     this.mockAckTimer = setTimeout(() => {
-      if (this.connected && this.mockMsgId === currentId) {
-        console.log(`[Mock Band] Double-tap detected on Band 0x4A! Acknowledging msg=${currentId}...`);
-        this.notifyStatus(`msg=${currentId} type=${type} arg=${arg} bands=1 rx=1 ack=1 unconfirmed=NONE`);
+      if (this.connected) {
+        console.log(`[Mock] Double-tap detected on wrist!`);
+        this.notifyStatus(`ACK ${msgId}`);
       }
     }, 3500);
   }
