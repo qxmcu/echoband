@@ -1,9 +1,10 @@
 {
   "name": "echoband",
   "version": "1.0.0",
-  "description": "EchoBand: Wearable alert and accessibility system for transport terminals",
+  "description": "EchoBand: Universal Sensory Accessibility Wearable",
   "type": "module",
   "scripts": {
+    "start": "serve -l 8080 -C phone",
     "test": "node tests/match.test.js"
   },
   "keywords": [
@@ -11,7 +12,7 @@
     "accessibility",
     "esp32",
     "haptics",
-    "esp-now"
+    "ble"
   ],
   "author": "EchoBand Team",
   "license": "MIT"
