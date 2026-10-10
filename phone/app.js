@@ -158,20 +158,6 @@ class EchoBandApp {
     document.getElementById('btnOpCancelled').addEventListener('click', () => {
       this.triggerAlert(ALERT_TYPES.CANCELLED, 0);
     });
-
-    const elBtnFallback = document.getElementById('btnManualAckFallback');
-    if (elBtnFallback) {
-      elBtnFallback.addEventListener('click', async () => {
-        if (this.transport && this.transport.isConnected()) {
-          try {
-            await this.transport.send(ALERT_TYPES.NONE, 0, this.currentMsgSeq);
-          } catch (err) {
-            console.warn('[App] Fallback dismiss send error:', err);
-          }
-        }
-        this.ui.markAcknowledged(this.currentMsgSeq);
-      });
-    }
   }
 
   async triggerAlert(type, arg = 0, labels = null) {
@@ -370,12 +356,17 @@ class EchoBandApp {
 
   initServiceWorker() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js')
-        .then((reg) => {
-          reg.update();
-          console.log('[SW] Service Worker registered & updated:', reg.scope);
-        })
-        .catch((err) => console.warn('[SW] Registration failed:', err));
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        for (const reg of registrations) {
+          reg.unregister();
+          console.log('[SW] Unregistered service worker:', reg.scope);
+        }
+      });
+    }
+    if ('caches' in window) {
+      caches.keys().then((keys) => {
+        keys.forEach((key) => caches.delete(key));
+      });
     }
   }
 }

@@ -7,6 +7,18 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="description" content="EchoBand: Universal Sensory Accessibility Wearable — One Message, Every Sense">
   <title>EchoBand — Universal Sensory Assistant</title>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(regs) {
+        for (var r of regs) r.unregister();
+      });
+    }
+    if ('caches' in window) {
+      caches.keys().then(function(keys) {
+        for (var k of keys) caches.delete(k);
+      });
+    }
+  </script>
   <style>
     :root {
       --bg: #070a13;
