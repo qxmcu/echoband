@@ -3,464 +3,627 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#0f172a">
-  <meta name="description" content="EchoBand: Wearable alert and accessibility system for transport terminals">
-  <title>EchoBand — One Message, Every Sense</title>
+  <meta name="theme-color" content="#070a13">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="description" content="EchoBand: Universal Sensory Accessibility Wearable — One Message, Every Sense">
+  <title>EchoBand — Universal Sensory Assistant</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
+      --bg: #070a13;
+      --card-bg: #0f172a;
+      --card-elevated: #162036;
+      --border: #1e293b;
+      --border-focus: #38bdf8;
       --text-main: #f8fafc;
       --text-sub: #94a3b8;
-      --primary: #0284c7;
-      --success: #16a34a;
-      --warning: #ea580c;
-      --danger: #dc2626;
-      --radius: 14px;
+      --accent-blue: #0284c7;
+      --accent-cyan: #38bdf8;
+      --accent-orange: #f97316;
+      --accent-green: #22c55e;
+      --accent-red: #ef4444;
+      --accent-purple: #8b5cf6;
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Malayalam", "Noto Sans Devanagari", sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Noto Sans Malayalam", "Noto Sans Devanagari", sans-serif;
       background: var(--bg);
       color: var(--text-main);
-      padding: 14px;
-      max-width: 680px;
+      padding: 16px 14px 40px;
+      max-width: 640px;
       margin: 0 auto;
-      line-height: 1.4;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
     }
 
+    /* Top Universal Header */
     header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 14px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid #334155;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     }
-    .brand h1 { font-size: 1.4rem; font-weight: 800; letter-spacing: -0.5px; }
-    .brand p { font-size: 0.75rem; color: var(--text-sub); }
-
-    .transport-controls {
+    .brand-wrap {
       display: flex;
-      gap: 6px;
       align-items: center;
+      gap: 10px;
     }
-    select, button {
-      font-size: 0.85rem;
-      padding: 8px 12px;
-      border-radius: 8px;
-      border: 1px solid #475569;
-      background: #334155;
-      color: #fff;
-      cursor: pointer;
-      font-weight: 600;
-    }
-    select:focus, button:focus { outline: 2px solid var(--primary); }
-    .btn-connect { background: var(--primary); border-color: var(--primary); }
-    .btn-connected { background: var(--success); border-color: var(--success); }
-
-    /* Big Visual Alert Card */
-    .alert-card {
-      background: var(--card-bg);
-      border-radius: var(--radius);
-      padding: 18px;
-      text-align: center;
-      margin-bottom: 14px;
-      border: 2px solid #334155;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-      position: relative;
-      transition: all 0.3s ease;
-    }
-    .pulse-urgent {
-      border-color: var(--danger) !important;
-      animation: pulseAlert 1s infinite alternate;
-    }
-    @keyframes pulseAlert {
-      from { box-shadow: 0 0 10px rgba(220, 38, 38, 0.4); }
-      to { box-shadow: 0 0 30px rgba(220, 38, 38, 0.9); }
-    }
-
-    .pictogram-box {
-      width: 130px;
-      height: 130px;
-      margin: 0 auto 12px;
-      border-radius: 18px;
-      overflow: hidden;
-      background: #0f172a;
+    .brand-logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #0284c7, #6366f1);
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 1px solid #334155;
+      font-weight: 900;
+      font-size: 1.1rem;
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
     }
-    .pictogram-box img { width: 100%; height: 100%; object-fit: contain; }
-
-    .badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 999px;
-      font-size: 0.75rem;
+    .brand-text h1 {
+      font-size: 1.25rem;
       font-weight: 800;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      margin-bottom: 8px;
+      letter-spacing: -0.3px;
+      color: #ffffff;
     }
-    .badge-standby { background: #475569; color: #f8fafc; }
-    .badge-platform { background: #0284c7; color: #fff; }
-    .badge-delay { background: #ea580c; color: #fff; }
-    .badge-departure { background: #16a34a; color: #fff; }
-    .badge-urgent { background: #dc2626; color: #fff; }
-    .badge-cancelled { background: #64748b; color: #fff; }
-
-    .labels h2 { font-size: 1.5rem; font-weight: 700; margin-bottom: 4px; }
-    .labels .ml { font-size: 1.15rem; color: #e2e8f0; margin-bottom: 3px; font-weight: 600; }
-    .labels .hi { font-size: 1.15rem; color: #cbd5e1; font-weight: 600; }
-
-    /* Alert Timeline */
-    .timeline-panel {
-      background: var(--card-bg);
-      border-radius: var(--radius);
-      padding: 12px 14px;
-      border: 1px solid #334155;
-      margin-bottom: 14px;
-    }
-    .timeline-steps {
-      display: flex;
-      justify-content: space-between;
-      position: relative;
-      margin-top: 6px;
-    }
-    .tl-step {
-      flex: 1;
-      text-align: center;
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: #64748b;
-      padding: 8px 4px;
-      border-radius: 8px;
-      background: #0f172a;
-      margin: 0 4px;
-      border: 1px solid #334155;
-      transition: all 0.3s;
-    }
-    .tl-step.active {
-      background: #0369a1;
-      color: #fff;
-      border-color: #38bdf8;
-    }
-    .tl-step.active-success {
-      background: #15803d;
-      color: #fff;
-      border-color: #4ade80;
-    }
-    .tl-step.failed {
-      background: #7f1d1d;
-      color: #fca5a5;
-      border-color: #ef4444;
-    }
-    .tl-msg {
-      font-size: 0.8rem;
-      text-align: center;
-      margin-top: 8px;
+    .brand-text p {
+      font-size: 0.72rem;
       color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    .transport-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    select, button {
+      font-family: inherit;
+      font-size: 0.82rem;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      color: var(--text-main);
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+    select:focus, button:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+    }
+    .btn-connect {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+      color: #fff;
+    }
+    .btn-connect:hover { background: #0369a1; }
+    .btn-connected {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: var(--accent-green);
+      color: #4ade80;
+    }
+
+    /* Hero Sensory Announcement Card */
+    .hero-card {
+      background: radial-gradient(120% 120% at 50% 0%, #162036 0%, #0c1322 100%);
+      border-radius: var(--radius-lg);
+      padding: 24px 18px;
+      text-align: center;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+      margin-bottom: 16px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+    .hero-card.urgent-mode {
+      border-color: var(--accent-red) !important;
+      animation: alertPulse 1.2s infinite alternate;
+    }
+    @keyframes alertPulse {
+      from { box-shadow: 0 0 15px rgba(239, 68, 68, 0.3); }
+      to { box-shadow: 0 0 35px rgba(239, 68, 68, 0.75); }
+    }
+
+    .pictogram-frame {
+      width: 130px;
+      height: 130px;
+      margin: 0 auto 14px;
+      border-radius: 24px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+    .pictogram-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 14px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .badge-standby { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid #334155; }
+    .badge-location { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #0284c7; }
+    .badge-delay { background: rgba(249, 115, 22, 0.15); color: #fb923c; border: 1px solid #ea580c; }
+    .badge-departure { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid #16a34a; }
+    .badge-urgent { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #dc2626; }
+    .badge-cancelled { background: rgba(100, 116, 139, 0.2); color: #cbd5e1; border: 1px solid #475569; }
+
+    .announcement-titles h2 {
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.4px;
+      margin-bottom: 6px;
+      color: #ffffff;
+    }
+    .announcement-titles .ml-sub {
+      font-size: 1.15rem;
+      color: #cbd5e1;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .announcement-titles .hi-sub {
+      font-size: 1.12rem;
+      color: #94a3b8;
       font-weight: 500;
     }
-    .tl-msg-success { color: #4ade80 !important; font-weight: 700; }
-    .tl-msg-danger { color: #f87171 !important; font-weight: 700; }
 
-    /* Profile Bar */
-    .profile-bar {
+    /* Sensory Confirmation Timeline */
+    .timeline-card {
+      background: var(--card-bg);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .timeline-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .timeline-title {
+      font-size: 0.78rem;
+      font-weight: 800;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+    .status-dot-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #64748b;
+    }
+    .status-dot.active { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+
+    .timeline-track {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      position: relative;
+    }
+    .tl-node {
+      background: #090e1a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 9px 4px;
+      text-align: center;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #64748b;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .tl-node.active {
+      background: rgba(2, 132, 199, 0.2);
+      border-color: var(--accent-cyan);
+      color: #38bdf8;
+    }
+    .tl-node.success {
+      background: rgba(34, 197, 94, 0.2);
+      border-color: var(--accent-green);
+      color: #4ade80;
+    }
+    .tl-node.failed {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: var(--accent-red);
+      color: #f87171;
+    }
+    .tl-feedback {
+      text-align: center;
+      font-size: 0.8rem;
+      margin-top: 10px;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    /* Wearer Profile Segmented Bar */
+    .profile-card {
       display: flex;
       justify-content: space-between;
       align-items: center;
       background: var(--card-bg);
       padding: 10px 14px;
-      border-radius: 10px;
-      margin-bottom: 14px;
-      border: 1px solid #334155;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      margin-bottom: 16px;
     }
-    .profile-bar label { font-size: 0.85rem; color: var(--text-sub); }
-
-    /* Section Titles */
-    .section-title {
-      font-size: 0.95rem;
+    .profile-card label {
+      font-size: 0.8rem;
       font-weight: 700;
+      color: var(--text-sub);
       text-transform: uppercase;
       letter-spacing: 0.5px;
+    }
+
+    /* Universal Touch Control Tiles */
+    .controls-title {
+      font-size: 0.8rem;
+      font-weight: 800;
       color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
       margin-bottom: 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
     }
-
-    /* Operator Manual Touch Buttons (Primary Path) */
-    .operator-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 14px;
+    .location-selector-wrap {
+      background: var(--card-bg);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      border: 1px solid var(--border);
+      margin-bottom: 12px;
     }
-    .btn-op {
-      padding: 14px 10px;
-      font-size: 0.95rem;
-      border-radius: 12px;
-      border: none;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-    }
-    .btn-op span { font-size: 0.75rem; opacity: 0.85; font-weight: normal; }
-    .btn-op-plat { background: #0284c7; }
-    .btn-op-delay { background: #ea580c; }
-    .btn-op-dep { background: #16a34a; }
-    .btn-op-urg { background: #dc2626; }
-    .btn-op-canc { background: #475569; grid-column: span 2; }
-
-    .platform-selector {
+    .location-bar {
       display: flex;
       gap: 6px;
       margin-top: 6px;
     }
     .btn-pnum {
       flex: 1;
-      padding: 6px 0;
+      padding: 8px 0;
       font-size: 0.85rem;
-      background: #0369a1;
-      border: 1px solid #38bdf8;
-      border-radius: 6px;
+      font-weight: 700;
+      background: #090e1a;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: #cbd5e1;
     }
-    .btn-pnum.active { background: #38bdf8; color: #000; font-weight: bold; }
+    .btn-pnum.active {
+      background: var(--accent-blue);
+      border-color: var(--accent-cyan);
+      color: #ffffff;
+      box-shadow: 0 2px 10px rgba(2, 132, 199, 0.3);
+    }
 
-    /* Audio / Speech Recognition Panel */
-    .audio-panel {
-      background: var(--card-bg);
-      border-radius: var(--radius);
-      padding: 14px;
-      border: 1px solid #334155;
-      margin-bottom: 14px;
+    .tiles-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 16px;
     }
-    .audio-bar-wrap {
+    .tile-btn {
+      padding: 14px 12px;
+      border-radius: var(--radius-md);
+      border: 1px solid transparent;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 3px;
+      text-align: left;
+      transition: transform 0.1s ease, filter 0.2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .tile-btn:active { transform: scale(0.97); }
+    .tile-btn .tile-title {
+      font-size: 0.95rem;
+      font-weight: 800;
+      color: #fff;
+    }
+    .tile-btn .tile-desc {
+      font-size: 0.72rem;
+      color: rgba(255, 255, 255, 0.75);
+    }
+    .tile-loc { background: linear-gradient(135deg, #0369a1, #0284c7); }
+    .tile-delay { background: linear-gradient(135deg, #c2410c, #ea580c); }
+    .tile-dep { background: linear-gradient(135deg, #15803d, #16a34a); }
+    .tile-urg { background: linear-gradient(135deg, #991b1b, #dc2626); }
+    .tile-canc {
+      background: linear-gradient(135deg, #334155, #475569);
+      grid-column: span 2;
+    }
+
+    /* Ambient Speech & Audio Interface */
+    .speech-card {
+      background: var(--card-bg);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      border: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .wave-bar-wrap {
       height: 6px;
-      background: #334155;
+      background: #090e1a;
       border-radius: 3px;
       overflow: hidden;
       margin: 10px 0;
     }
-    .audio-bar {
+    .wave-bar {
       height: 100%;
       width: 0%;
-      background: var(--primary);
+      background: linear-gradient(90deg, #0284c7, #38bdf8);
       transition: width 0.05s linear;
     }
-    .audio-btns {
+    .speech-controls {
       display: flex;
       gap: 8px;
-      margin-top: 8px;
+      margin-bottom: 10px;
     }
-    .btn-listen {
+    .btn-mic {
       flex: 1;
-      background: #6366f1;
+      background: #4f46e5;
       border: none;
-      padding: 10px;
-      border-radius: 8px;
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
       font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
-    .btn-listen.listening {
-      background: #e11d48;
-      animation: micPulse 1.2s infinite;
+    .btn-mic.listening {
+      background: #dc2626;
+      animation: micGlow 1.2s infinite;
     }
-    @keyframes micPulse {
-      0% { opacity: 1; }
-      50% { opacity: 0.6; }
-      100% { opacity: 1; }
+    @keyframes micGlow {
+      0% { opacity: 1; box-shadow: 0 0 6px #dc2626; }
+      50% { opacity: 0.65; box-shadow: 0 0 16px #dc2626; }
+      100% { opacity: 1; box-shadow: 0 0 6px #dc2626; }
     }
 
-    .transcript-box {
-      margin-top: 10px;
-      padding: 10px;
-      background: #0f172a;
-      border-radius: 8px;
-      border: 1px solid #334155;
+    .transcript-viewer {
+      padding: 12px;
+      background: #090e1a;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
       font-size: 0.85rem;
-      min-height: 40px;
-      color: #e2e8f0;
+      min-height: 44px;
+      color: #cbd5e1;
       font-style: italic;
     }
 
-    .btn-chip {
-      background: #1e293b;
-      border: 1px solid #475569;
-      color: #38bdf8;
-      padding: 4px 8px;
-      border-radius: 6px;
+    .chips-label {
       font-size: 0.72rem;
-      font-weight: 500;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 10px;
+      margin-bottom: 6px;
+    }
+    .chips-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .btn-chip {
+      background: var(--card-elevated);
+      border: 1px solid var(--border);
+      color: var(--accent-cyan);
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
       cursor: pointer;
     }
     .btn-chip:hover {
-      background: #334155;
-      border-color: #38bdf8;
+      background: #1e293b;
+      border-color: var(--accent-cyan);
     }
 
-    .progress-bar-wrap {
+    .manual-input-row {
+      display: flex;
+      gap: 6px;
+    }
+    .manual-input-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: #090e1a;
+      color: #fff;
+      font-size: 0.85rem;
+    }
+
+    .progress-track {
       height: 4px;
-      background: #334155;
+      background: #090e1a;
       border-radius: 2px;
       overflow: hidden;
       margin-top: 6px;
       display: none;
     }
-    .progress-bar { height: 100%; width: 0%; background: #38bdf8; transition: width 0.2s; }
+    .progress-fill { height: 100%; width: 0%; background: var(--accent-cyan); transition: width 0.2s; }
   </style>
 </head>
 <body>
 
   <header>
-    <div class="brand">
-      <h1>EchoBand</h1>
-      <p>One Message, Every Sense</p>
+    <div class="brand-wrap">
+      <div class="brand-logo">E</div>
+      <div class="brand-text">
+        <h1>EchoBand</h1>
+        <p>Universal Sensory Assistant</p>
+      </div>
     </div>
-    <div class="transport-controls">
+    <div class="transport-bar">
       <select id="transportType">
         <option value="ble">BLE (EchoBand)</option>
         <option value="serial">Serial (USB)</option>
-        <option value="mock" selected>Mock (Simulator)</option>
+        <option value="mock" selected>Simulator (Mock)</option>
       </select>
       <button id="btnConnect" class="btn-connect">Connect</button>
     </div>
   </header>
 
   <main>
-    <!-- Big Visual Alert Card -->
-    <section id="alertCard" class="alert-card" aria-live="polite">
-      <div id="alertBadge" class="badge badge-standby">SYSTEM STANDBY</div>
-      <div class="pictogram-box">
+    <!-- Big Universal Alert Card -->
+    <section id="alertCard" class="hero-card" aria-live="polite">
+      <div id="alertBadge" class="badge-pill badge-standby">SYSTEM STANDBY</div>
+      <div class="pictogram-frame">
         <img id="alertPictogram" src="./assets/platform.svg" alt="EchoBand Pictogram" />
       </div>
-      <div class="labels">
-        <h2 id="labelEn">Waiting for announcements</h2>
-        <div id="labelMl" class="ml">അറിയിപ്പുകൾക്കായി കാത്തിരിക്കുന്നു</div>
-        <div id="labelHi" class="hi">उद्घोषणा की प्रतीक्षा कर रहे हैं</div>
+      <div class="announcement-titles">
+        <h2 id="labelEn">Waiting for announcement</h2>
+        <div id="labelMl" class="ml-sub">അറിയിപ്പുകൾക്കായി കാത്തിരിക്കുന്നു</div>
+        <div id="labelHi" class="hi-sub">उद्घोषणा की प्रतीक्षा कर रहे हैं</div>
       </div>
     </section>
 
-    <!-- Alert Timeline Flow (SENT -> RECEIVED -> ACKNOWLEDGED) -->
-    <section class="timeline-panel">
-      <div class="section-title">
-        <span>Alert Confirmation Loop</span>
-        <span id="connBadge" style="font-size:0.75rem; color:#4ade80;">Standby</span>
+    <!-- Sensory Confirmation Loop Timeline -->
+    <section class="timeline-card">
+      <div class="timeline-header">
+        <span class="timeline-title">Sensory Confirmation Loop</span>
+        <div class="status-dot-wrap">
+          <span id="connDot" class="status-dot"></span>
+          <span id="connBadge">Standby</span>
+        </div>
       </div>
-      <div class="timeline-steps">
-        <div id="tlSent" class="tl-step">1. SENT</div>
-        <div id="tlRx"   class="tl-step">2. RECEIVED (Band)</div>
-        <div id="tlAck"  class="tl-step">3. DOUBLE-TAP (ACK)</div>
+      <div class="timeline-track">
+        <div id="tlSent" class="tl-node">1. SENT</div>
+        <div id="tlRx"   class="tl-node">2. DELIVERED</div>
+        <div id="tlAck"  class="tl-node">3. DOUBLE-TAP ACK</div>
       </div>
-      <div id="tlStatusMsg" class="tl-msg">Ready to send alerts</div>
+      <div id="tlStatusMsg" class="tl-feedback">Ready to broadcast alert</div>
     </section>
 
-    <!-- Profile Selector (Synced with Band) -->
-    <div class="profile-bar">
-      <label for="profileSelect">Wearer Profile:</label>
+    <!-- Wearer Sense Profile -->
+    <div class="profile-card">
+      <label for="profileSelect">Wearer Modality:</label>
       <select id="profileSelect">
-        <option value="deaf" selected>Deaf (Servos + Color LEDs)</option>
+        <option value="deaf" selected>Deaf (Haptic Rhythm + Light)</option>
         <option value="deafblind">Deafblind (Tactile Only + Repeat)</option>
         <option value="blind">Blind (Audio Rhythm + Speech Readout)</option>
         <option value="language">Language (Pictogram & Text Focus)</option>
       </select>
     </div>
 
-    <!-- Manual Operator Touch Buttons (Primary Path) -->
+    <!-- Universal Touch Controls (Primary Demo Path) -->
     <section>
-      <div class="section-title">Manual Touch Buttons (Primary Demo Path)</div>
+      <div class="controls-title">Instant Touch Controls</div>
       
-      <!-- Platform Selector Row -->
-      <div style="margin-bottom: 8px;">
-        <div style="font-size: 0.8rem; color: var(--text-sub); margin-bottom: 4px;">Choose Platform:</div>
-        <div class="platform-selector">
-          <button class="btn-pnum" data-plat="1">P 1</button>
-          <button class="btn-pnum active" data-plat="2">P 2</button>
-          <button class="btn-pnum" data-plat="3">P 3</button>
-          <button class="btn-pnum" data-plat="4">P 4</button>
-          <button class="btn-pnum" data-plat="5">P 5</button>
+      <!-- Zone / Gate / Platform Selector -->
+      <div class="location-selector-wrap">
+        <div style="font-size:0.75rem; color:var(--text-sub); font-weight:600;">Wayfinding / Gate / Platform:</div>
+        <div class="location-bar">
+          <button class="btn-pnum" data-plat="1">Zone 1</button>
+          <button class="btn-pnum active" data-plat="2">Zone 2</button>
+          <button class="btn-pnum" data-plat="3">Zone 3</button>
+          <button class="btn-pnum" data-plat="4">Zone 4</button>
+          <button class="btn-pnum" data-plat="5">Zone 5</button>
         </div>
       </div>
 
-      <div class="operator-grid">
-        <button id="btnOpPlatform" class="btn-op btn-op-plat">
-          Platform Alert
-          <span>M1 long + N taps</span>
+      <div class="tiles-grid">
+        <button id="btnOpPlatform" class="tile-btn tile-loc">
+          <span class="tile-title">📍 Location / Gate</span>
+          <span class="tile-desc">Directional waypoint alert</span>
         </button>
-        <button id="btnOpDelay" class="btn-op btn-op-delay">
-          Delay Alert
-          <span>M2 two short taps</span>
+        <button id="btnOpDelay" class="tile-btn tile-delay">
+          <span class="tile-title">⏳ Schedule Delay</span>
+          <span class="tile-desc">Postponed schedule notice</span>
         </button>
-        <button id="btnOpDeparture" class="btn-op btn-op-dep">
-          Departure Alert
-          <span>M3 long tap</span>
+        <button id="btnOpDeparture" class="tile-btn tile-dep">
+          <span class="tile-title">🚀 Boarding / Start</span>
+          <span class="tile-desc">Immediate action signal</span>
         </button>
-        <button id="btnOpUrgent" class="btn-op btn-op-urg">
-          URGENT Alert
-          <span>M4 rapid taps (repeating)</span>
+        <button id="btnOpUrgent" class="tile-btn tile-urg">
+          <span class="tile-title">🚨 Emergency Alert</span>
+          <span class="tile-desc">Continuous high-priority taps</span>
         </button>
-        <button id="btnOpCancelled" class="btn-op btn-op-canc">
-          Service Cancelled
-          <span>M2 then M4</span>
+        <button id="btnOpCancelled" class="tile-btn tile-canc">
+          <span class="tile-title">✖️ Service Cancelled / Suspended</span>
+          <span class="tile-desc">Service voided or access closed</span>
         </button>
       </div>
     </section>
 
-    <!-- Speech Recognition Panel (Secondary Bonus) -->
-    <section class="audio-panel">
-      <div class="section-title">
-        <span>Speech Recognition</span>
-        <span id="asrStatus" style="font-size:0.75rem; text-transform:none; color:#38bdf8;">Standby</span>
+    <!-- Speech & Ambient Audio Listener -->
+    <section class="speech-card">
+      <div class="timeline-header">
+        <span class="timeline-title">Ambient Speech Listener</span>
+        <span id="asrStatus" style="font-size:0.72rem; color:var(--accent-cyan); font-weight:700;">Standby</span>
       </div>
-      <div id="asrProgressWrap" class="progress-bar-wrap">
-        <div id="asrProgressBar" class="progress-bar"></div>
+      <div id="asrProgressWrap" class="progress-track">
+        <div id="asrProgressBar" class="progress-fill"></div>
       </div>
-      <div class="audio-bar-wrap">
-        <div id="audioLevelBar" class="audio-bar"></div>
+      <div class="wave-bar-wrap">
+        <div id="audioLevelBar" class="wave-bar"></div>
       </div>
-      <div class="audio-btns" style="margin-bottom: 8px;">
+      <div class="speech-controls">
         <select id="asrEngine" style="flex:1;">
-          <option value="native" selected>Native Chrome Speech (Instant 0MB)</option>
-          <option value="whisper">Whisper Base (WebGPU / WASM)</option>
+          <option value="native" selected>Native Speech (Instant 0MB)</option>
+          <option value="whisper">Whisper Base (Offline WebGPU)</option>
         </select>
         <select id="asrLanguage" style="flex:1;">
           <option value="en">English (en-IN)</option>
           <option value="ml">Malayalam (മലയാളം)</option>
           <option value="hi">Hindi (हिन्दी)</option>
-          <option value="auto">Auto Detect</option>
+          <option value="auto">Auto Language</option>
         </select>
-        <button id="btnListen" class="btn-listen">Listen Mic</button>
-      </div>
-      <div id="transcriptText" class="transcript-box">
-        Tap "Listen Mic" or click quick sample phrases below.
+        <button id="btnListen" class="btn-mic">🎙️ Listen Mic</button>
       </div>
 
-      <!-- Quick Test Phrases (Zero-latency demo mode for judges) -->
-      <div style="margin-top: 10px;">
-        <div style="font-size: 0.75rem; color: var(--text-sub); margin-bottom: 4px;">Quick Test Phrases (Click to simulate speech):</div>
-        <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
-          <button class="btn-chip" data-phrase="The train to Ernakulam will depart from platform two">Platform 2 (EN)</button>
-          <button class="btn-chip" data-phrase="Train 12625 is delayed by fifteen minutes">Delayed (EN)</button>
-          <button class="btn-chip" data-phrase="അടിയന്തര അറിയിപ്പ്: ശ്രദ്ധിക്കുക">അടിയന്തര (Urgent ML)</button>
-          <button class="btn-chip" data-phrase="ട്രെയിൻ റദ്ദാക്കി">റദ്ദാക്കി (Cancel ML)</button>
-          <button class="btn-chip" data-phrase="तत्काल सूचना: कृपया ध्यान दें">तत्काल (Urgent HI)</button>
-        </div>
-        <div style="display: flex; gap: 6px;">
-          <input type="text" id="manualSpeechInput" placeholder="Or type any announcement..." style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid #475569; background:#0f172a; color:#fff; font-size:0.85rem;">
-          <button id="btnSimulateSpeech" style="background:#0284c7; border:none; padding:8px 12px; border-radius:8px; font-weight:700;">Parse</button>
-        </div>
+      <div id="transcriptText" class="transcript-viewer">
+        Tap "Listen Mic" or test with sample announcement chips below.
+      </div>
+
+      <div class="chips-label">Demo Simulation Chips:</div>
+      <div class="chips-row">
+        <button class="btn-chip" data-phrase="Gate two announcement departing now">Gate 2 (EN)</button>
+        <button class="btn-chip" data-phrase="Service delayed by fifteen minutes">Delayed (EN)</button>
+        <button class="btn-chip" data-phrase="അടിയന്തര അറിയിപ്പ്: ശ്രദ്ധിക്കുക">അടിയന്തര (Urgent ML)</button>
+        <button class="btn-chip" data-phrase="ട്രെയിൻ റദ്ദാക്കി">റദ്ദാക്കി (Cancel ML)</button>
+        <button class="btn-chip" data-phrase="तत्काल सूचना: कृपया ध्यान दें">तत्काल (Urgent HI)</button>
+      </div>
+      <div class="manual-input-row">
+        <input type="text" id="manualSpeechInput" placeholder="Or type any public announcement..." />
+        <button id="btnSimulateSpeech" style="background:#0284c7; border:none; padding:8px 14px; border-radius:8px; font-weight:700; color:#fff;">Parse</button>
       </div>
     </section>
   </main>
 
-  <!-- Module Script -->
   <script type="module" src="./app.js"></script>
 </body>
 </html>

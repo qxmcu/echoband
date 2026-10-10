@@ -1,12 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%">
-  <rect width="200" height="200" rx="24" fill="#16a34a" />
-  <!-- Train departing -->
-  <path d="M35 60 C35 50, 50 45, 75 45 L115 45 C125 45, 130 50, 130 60 L130 135 L35 135 Z" fill="#ffffff" />
-  <rect x="45" y="60" width="25" height="25" rx="3" fill="#15803d" />
-  <rect x="80" y="60" width="40" height="25" rx="3" fill="#15803d" />
-  <!-- Wheels -->
-  <circle cx="55" cy="142" r="10" fill="#334155" />
-  <circle cx="110" cy="142" r="10" fill="#334155" />
-  <!-- Big Forward Departure Arrow -->
-  <path d="M125 105 L155 105 L155 90 L185 118 L155 146 L155 131 L125 131 Z" fill="#facc15" stroke="#ffffff" stroke-width="3" />
+  <defs>
+    <linearGradient id="depGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#16a34a" />
+      <stop offset="100%" stop-color="#15803d" />
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="36" fill="url(#depGrad)" />
+  <!-- Portal / Departure Gate Frame -->
+  <rect x="42" y="38" width="68" height="124" rx="14" fill="#ffffff" />
+  <rect x="52" y="48" width="48" height="104" rx="8" fill="#dcfce7" />
+  <!-- Dynamic Forward Kinetic Movement Arrow -->
+  <path d="M102 100 L140 100 L140 82 L172 100 L140 118 L140 100 Z" fill="#ffffff" />
+  <circle cx="152" cy="100" r="28" fill="none" stroke="#facc15" stroke-width="6" stroke-dasharray="8 6" />
+  <!-- Walking passenger silhouette entering gate -->
+  <circle cx="76" cy="72" r="12" fill="#16a34a" />
+  <path d="M66 128 L72 94 C72 88, 80 88, 80 94 L86 128 Z" fill="#16a34a" />
 </svg>

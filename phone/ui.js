@@ -1,4 +1,4 @@
-// ui.js — Accessible DOM rendering, multilingual cards, timeline, and speech synthesis for EchoBand
+// ui.js — Universal DOM rendering, multimodal cards, timeline, and speech synthesis for EchoBand
 
 import { ALERT_TYPES, ALERT_NAMES, ALERT_LABELS } from './match.js';
 
@@ -69,7 +69,7 @@ export class UIManager {
 
   setTranscript(text, isRecognized = true) {
     if (this.elTranscriptText) {
-      this.elTranscriptText.textContent = text || 'Listening...';
+      this.elTranscriptText.textContent = text || 'Listening for speech...';
       if (!isRecognized && text) {
         this.elTranscriptText.textContent += ' (No alert recognized)';
       }
@@ -104,16 +104,25 @@ export class UIManager {
     if (this.elLabelHi) this.elLabelHi.textContent = labels.hi;
 
     // Update Badge
+    const nameMap = {
+      [ALERT_TYPES.PLATFORM]: 'location',
+      [ALERT_TYPES.DELAY]: 'delay',
+      [ALERT_TYPES.DEPARTURE]: 'departure',
+      [ALERT_TYPES.URGENT]: 'urgent',
+      [ALERT_TYPES.CANCELLED]: 'cancelled'
+    };
+    const styleKey = nameMap[type] || 'standby';
+
     if (this.elAlertBadge) {
-      this.elAlertBadge.textContent = ALERT_NAMES[type] + (arg ? ` (Platform ${arg})` : '');
-      this.elAlertBadge.className = `badge badge-${ALERT_NAMES[type].toLowerCase()}`;
+      this.elAlertBadge.textContent = ALERT_NAMES[type] + (arg ? ` ${arg}` : '');
+      this.elAlertBadge.className = `badge-pill badge-${styleKey}`;
     }
 
     // High visual highlight
     if (this.elAlertCard) {
-      this.elAlertCard.classList.remove('pulse-urgent');
+      this.elAlertCard.classList.remove('urgent-mode');
       if (type === ALERT_TYPES.URGENT) {
-        this.elAlertCard.classList.add('pulse-urgent');
+        this.elAlertCard.classList.add('urgent-mode');
       }
     }
 
@@ -127,53 +136,54 @@ export class UIManager {
   }
 
   resetAlert() {
-    if (this.elLabelEn) this.elLabelEn.textContent = 'Waiting for announcements';
+    if (this.elLabelEn) this.elLabelEn.textContent = 'Waiting for announcement';
     if (this.elLabelMl) this.elLabelMl.textContent = 'അറിയിപ്പുകൾക്കായി കാത്തിരിക്കുന്നു';
     if (this.elLabelHi) this.elLabelHi.textContent = 'उद्घोषणा की प्रतीक्षा कर रहे हैं';
     if (this.elAlertBadge) {
       this.elAlertBadge.textContent = 'SYSTEM STANDBY';
-      this.elAlertBadge.className = 'badge badge-standby';
+      this.elAlertBadge.className = 'badge-pill badge-standby';
     }
-    if (this.elAlertCard) this.elAlertCard.classList.remove('pulse-urgent');
+    if (this.elAlertCard) this.elAlertCard.classList.remove('urgent-mode');
   }
 
-  // --- Alert Timeline Flow (SENT -> RECEIVED -> ACKNOWLEDGED / NOT CONFIRMED) ---
+  // --- Alert Timeline Flow (SENT -> DELIVERED -> ACKNOWLEDGED / NOT CONFIRMED) ---
   startTimeline() {
     if (this.ackTimer) clearTimeout(this.ackTimer);
 
-    if (this.elTimelineSent) this.elTimelineSent.className = 'tl-step active';
-    if (this.elTimelineRx)   this.elTimelineRx.className   = 'tl-step';
-    if (this.elTimelineAck)  this.elTimelineAck.className  = 'tl-step';
+    if (this.elTimelineSent) this.elTimelineSent.className = 'tl-node active';
+    if (this.elTimelineRx)   this.elTimelineRx.className   = 'tl-node';
+    if (this.elTimelineAck)  this.elTimelineAck.className  = 'tl-node';
     if (this.elTimelineMsg) {
-      this.elTimelineMsg.textContent = 'Alert sent to EchoBand...';
-      this.elTimelineMsg.className   = 'tl-msg';
+      this.elTimelineMsg.textContent = 'Broadcasting signal to EchoBand...';
+      this.elTimelineMsg.style.color = '#94a3b8';
     }
 
     // 15s unconfirmed countdown
     this.ackTimer = setTimeout(() => {
-      if (this.elTimelineAck && !this.elTimelineAck.classList.contains('active')) {
-        this.elTimelineAck.className = 'tl-step failed';
+      if (this.elTimelineAck && !this.elTimelineAck.classList.contains('success')) {
+        this.elTimelineAck.className = 'tl-node failed';
         if (this.elTimelineMsg) {
           this.elTimelineMsg.textContent = '⚠️ NOT CONFIRMED after 15 s (Wearer has not double-tapped)';
-          this.elTimelineMsg.className   = 'tl-msg tl-msg-danger';
+          this.elTimelineMsg.style.color = '#f87171';
         }
       }
     }, 15000);
   }
 
   markReceived(msgId) {
-    if (this.elTimelineRx)  this.elTimelineRx.className = 'tl-step active';
+    if (this.elTimelineRx)  this.elTimelineRx.className = 'tl-node active';
     if (this.elTimelineMsg) {
       this.elTimelineMsg.textContent = `EchoBand playing sensory wave (Msg #${msgId})...`;
+      this.elTimelineMsg.style.color = '#38bdf8';
     }
   }
 
   markAcknowledged(msgId) {
     if (this.ackTimer) clearTimeout(this.ackTimer);
-    if (this.elTimelineAck) this.elTimelineAck.className = 'tl-step active-success';
+    if (this.elTimelineAck) this.elTimelineAck.className = 'tl-node success';
     if (this.elTimelineMsg) {
       this.elTimelineMsg.textContent = `✅ ACKNOWLEDGED: Double-tap confirmed on wrist (Msg #${msgId})!`;
-      this.elTimelineMsg.className   = 'tl-msg tl-msg-success';
+      this.elTimelineMsg.style.color = '#4ade80';
     }
   }
 

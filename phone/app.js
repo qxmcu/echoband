@@ -23,6 +23,7 @@ class EchoBandApp {
     this.elAsrLangSelect    = document.getElementById('asrLanguage');
     this.elAudioLevelBar    = document.getElementById('audioLevelBar');
     this.elConnBadge        = document.getElementById('connBadge');
+    this.elConnDot          = document.getElementById('connDot');
 
     this.initTransport();
     this.initOperatorButtons();
@@ -101,11 +102,13 @@ class EchoBandApp {
         this.elConnBadge.textContent = 'Connected';
         this.elConnBadge.style.color = '#4ade80';
       }
+      if (this.elConnDot) this.elConnDot.classList.add('active');
     } else if (line === 'STATUS DISCONNECTED') {
       if (this.elConnBadge) {
         this.elConnBadge.textContent = 'Disconnected';
         this.elConnBadge.style.color = '#f87171';
       }
+      if (this.elConnDot) this.elConnDot.classList.remove('active');
     }
   }
 
@@ -117,6 +120,7 @@ class EchoBandApp {
         this.elConnBadge.textContent = 'Connected';
         this.elConnBadge.style.color = '#4ade80';
       }
+      if (this.elConnDot) this.elConnDot.classList.add('active');
     } else {
       this.elBtnConnect.textContent = 'Connect';
       this.elBtnConnect.className = 'btn-connect';
@@ -124,6 +128,7 @@ class EchoBandApp {
         this.elConnBadge.textContent = 'Disconnected';
         this.elConnBadge.style.color = '#94a3b8';
       }
+      if (this.elConnDot) this.elConnDot.classList.remove('active');
     }
   }
 

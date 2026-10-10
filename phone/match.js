@@ -2,6 +2,7 @@
 // Handles English, Malayalam, and Hindi speech transcripts
 
 export const ALERT_TYPES = {
+  STOP: 0,
   NONE: 0,
   PLATFORM: 1,
   DELAY: 2,
@@ -11,7 +12,7 @@ export const ALERT_TYPES = {
 };
 
 export const ALERT_NAMES = {
-  [ALERT_TYPES.PLATFORM]: 'PLATFORM',
+  [ALERT_TYPES.PLATFORM]: 'LOCATION',
   [ALERT_TYPES.DELAY]: 'DELAY',
   [ALERT_TYPES.DEPARTURE]: 'DEPARTURE',
   [ALERT_TYPES.URGENT]: 'URGENT',
@@ -20,19 +21,19 @@ export const ALERT_NAMES = {
 
 export const ALERT_LABELS = {
   [ALERT_TYPES.PLATFORM]: {
-    en: (n) => n ? `Platform ${n}` : 'Platform',
-    ml: (n) => n ? `പ്ലാറ്റ്ഫോം ${n}` : 'പ്ലാറ്റ്ഫോം',
-    hi: (n) => n ? `प्लेटफ़ॉर्म ${n}` : 'प्लेटफ़ॉर्म'
+    en: (n) => n ? `Gate / Platform ${n}` : 'Gate / Platform',
+    ml: (n) => n ? `പ്ലാറ്റ്ഫോം / ഗേറ്റ് ${n}` : 'പ്ലാറ്റ്ഫോം / ഗേറ്റ്',
+    hi: (n) => n ? `गेट / प्लेटफ़ॉर्म ${n}` : 'गेट / प्लेटफ़ॉर्म'
   },
   [ALERT_TYPES.DELAY]: {
-    en: () => 'Train delayed',
-    ml: () => 'ട്രെയിൻ വൈകുന്നു',
-    hi: () => 'ट्रेन देरी से है'
+    en: () => 'Service delayed',
+    ml: () => 'വൈകുന്നു (Delay)',
+    hi: () => 'देरी से है (Delay)'
   },
   [ALERT_TYPES.DEPARTURE]: {
-    en: () => 'Train departing',
-    ml: () => 'ട്രെയിൻ പുറപ്പെടുന്നു',
-    hi: () => 'ट्रेन रवाना हो रही है'
+    en: () => 'Now departing / boarding',
+    ml: () => 'പുറപ്പെടുന്നു (Boarding)',
+    hi: () => 'रवाना हो रही है (Boarding)'
   },
   [ALERT_TYPES.URGENT]: {
     en: () => 'Urgent announcement',
@@ -40,9 +41,9 @@ export const ALERT_LABELS = {
     hi: () => 'तत्काल सूचना'
   },
   [ALERT_TYPES.CANCELLED]: {
-    en: () => 'Train cancelled',
-    ml: () => 'ട്രെയിൻ റദ്ദാക്കി',
-    hi: () => 'ट्रेन रद्द है'
+    en: () => 'Service cancelled',
+    ml: () => 'റദ്ദാക്കി (Cancelled)',
+    hi: () => 'रद्द है (Cancelled)'
   }
 };
 
@@ -51,7 +52,7 @@ const KEYWORD_PATTERNS = [
   {
     type: ALERT_TYPES.URGENT,
     regexes: [
-      /\b(urgent|emergency)\b/i,
+      /\b(urgent|emergency|evacuate|danger|alert)\b/i,
       /(അടിയന്തര|അടിയന്തിര)/i,
       /(आपात|तत्काल)/i
     ]
@@ -59,7 +60,7 @@ const KEYWORD_PATTERNS = [
   {
     type: ALERT_TYPES.CANCELLED,
     regexes: [
-      /\b(cancel|canceled|cancelled|cancellation)\b/i,
+      /\b(cancel|canceled|cancelled|cancellation|suspended)\b/i,
       /(റദ്ദ്|റദ്ദാക്കി|റദ്ദാക്കപ്പെട്ടു)/i,
       /(रद्द|निरस्त)/i
     ]
@@ -67,7 +68,7 @@ const KEYWORD_PATTERNS = [
   {
     type: ALERT_TYPES.DELAY,
     regexes: [
-      /\b(delay|delayed|delaying|late)\b/i,
+      /\b(delay|delayed|delaying|late|postponed|rescheduled)\b/i,
       /(വൈകി|വൈകും|വൈകുന്നു|താമസം)/i,
       /(देरी|विलंब)/i
     ]
@@ -75,22 +76,22 @@ const KEYWORD_PATTERNS = [
   {
     type: ALERT_TYPES.PLATFORM,
     regexes: [
-      /\bplatform\b/i,
-      /(പ്ലാറ്റ്ഫോം|പ്ലാറ്റ്ഫോമിൽ)/i,
-      /(प्लेटफ़ॉर्म|प्लेटफार्म)/i
+      /\b(platform|gate|terminal|zone|track)\b/i,
+      /(പ്ലാറ്റ്ഫോം|പ്ലാറ്റ്ഫോമിൽ|ഗേറ്റ്)/i,
+      /(प्लेटफ़ॉर्म|प्लेटफार्म|गेट)/i
     ]
   },
   {
     type: ALERT_TYPES.DEPARTURE,
     regexes: [
-      /\b(depart|departure|departing|boarding|leaving)\b/i,
+      /\b(depart|departure|departing|boarding|leaving|start|starting)\b/i,
       /(പുറപ്പെടും|പുറപ്പെടുന്നു|യാത്ര തിരിക്കും)/i,
-      /(रवाना|प्रस्थान)/i
+      /(रवाना|प्रस्थान|बोर्डिंग)/i
     ]
   }
 ];
 
-// Number word dictionaries for platforms 1 to 5
+// Number word dictionaries for platforms/gates 1 to 5
 const NUMBER_WORDS = [
   { num: 1, words: ['1', 'one', 'ഒന്ന്', 'एक'] },
   { num: 2, words: ['2', 'two', 'രണ്ട്', 'दो'] },
@@ -99,16 +100,12 @@ const NUMBER_WORDS = [
   { num: 5, words: ['5', 'five', 'അഞ്ച്', 'पांच', 'पाँच'] }
 ];
 
-/**
- * Extracts platform number (1..5) from text.
- * Looks for number following or preceding the platform keyword, or general occurrences.
- */
 export function extractPlatformNumber(text) {
   if (!text) return 0;
   const lower = text.toLowerCase();
 
   // Try direct digit match first (1 to 5)
-  const digitMatch = lower.match(/(?:platform|പ്ലാറ്റ്ഫോം|प्लेटफ़ॉर्म|प्लेटफार्म)?\s*([1-5])\b/i);
+  const digitMatch = lower.match(/(?:platform|gate|terminal|zone|track|പ്ലാറ്റ്ഫോം|ഗേറ്റ്|प्लेटफ़ॉर्म|गेट)?\s*([1-5])\b/i);
   if (digitMatch && digitMatch[1]) {
     return parseInt(digitMatch[1], 10);
   }
@@ -118,7 +115,6 @@ export function extractPlatformNumber(text) {
     for (const w of item.words) {
       if (typeof w === 'string') {
         const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Word boundary for ASCII or direct substring for Indic scripts
         const re = /[a-z0-9]/i.test(w)
           ? new RegExp(`\\b${escaped}\\b`, 'i')
           : new RegExp(escaped, 'i');
@@ -132,10 +128,6 @@ export function extractPlatformNumber(text) {
   return 0;
 }
 
-/**
- * Matches an input text transcript to an EchoBand alert.
- * Returns an object with matched status, type, arg, and multilingual labels.
- */
 export function matchAnnouncement(text) {
   if (!text || typeof text !== 'string' || text.trim() === '') {
     return {
