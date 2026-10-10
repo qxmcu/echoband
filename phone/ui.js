@@ -32,6 +32,7 @@ export class UIManager {
     this.elAsrStatus      = document.getElementById('asrStatus');
     this.elAsrProgress    = document.getElementById('asrProgressBar');
     this.elAsrProgressWrap= document.getElementById('asrProgressWrap');
+    this.elBtnManualAck   = document.getElementById('btnManualAckFallback');
 
     this.currentProfile = 'deaf';
     this.ackTimer = null;
@@ -144,6 +145,7 @@ export class UIManager {
       this.elAlertBadge.className = 'badge-pill badge-standby';
     }
     if (this.elAlertCard) this.elAlertCard.classList.remove('urgent-mode');
+    if (this.elBtnManualAck) this.elBtnManualAck.style.display = 'none';
   }
 
   // --- Alert Timeline Flow (SENT -> DELIVERED -> ACKNOWLEDGED / NOT CONFIRMED) ---
@@ -153,6 +155,7 @@ export class UIManager {
     if (this.elTimelineSent) this.elTimelineSent.className = 'tl-node active';
     if (this.elTimelineRx)   this.elTimelineRx.className   = 'tl-node';
     if (this.elTimelineAck)  this.elTimelineAck.className  = 'tl-node';
+    if (this.elBtnManualAck) this.elBtnManualAck.style.display = 'inline-block';
     if (this.elTimelineMsg) {
       this.elTimelineMsg.textContent = 'Broadcasting signal to EchoBand...';
       this.elTimelineMsg.style.color = '#94a3b8';
@@ -181,6 +184,7 @@ export class UIManager {
   markAcknowledged(msgId) {
     if (this.ackTimer) clearTimeout(this.ackTimer);
     if (this.elTimelineAck) this.elTimelineAck.className = 'tl-node success';
+    if (this.elBtnManualAck) this.elBtnManualAck.style.display = 'none';
     if (this.elTimelineMsg) {
       this.elTimelineMsg.textContent = `✅ ACKNOWLEDGED: Double-tap confirmed on wrist (Msg #${msgId})!`;
       this.elTimelineMsg.style.color = '#4ade80';

@@ -14,8 +14,9 @@
 5. [Master GPIO Pinout Quick-Reference Table](#5-master-gpio-pinout-quick-reference-table)
 6. [Mechanical Armband Assembly](#6-mechanical-armband-assembly)
 7. [How to Flash the Firmware (Arduino IDE Guide)](#7-how-to-flash-the-firmware-arduino-ide-guide)
-8. [Step-by-Step Bench Testing & Verification](#8-step-by-step-bench-testing--verification)
-9. [Troubleshooting & Emergency Fixes](#9-troubleshooting--emergency-fixes)
+8. [System Health Status LEDs & Fallback Protections](#8-system-health-status-leds--fallback-protections)
+9. [Step-by-Step Bench Testing & Verification](#9-step-by-step-bench-testing--verification)
+10. [Troubleshooting & Emergency Fixes](#10-troubleshooting--emergency-fixes)
 
 ---
 
@@ -254,7 +255,37 @@ Go to **Tools $\to$ Manage Libraries...** and install:
 
 ---
 
-## 8. Step-by-Step Bench Testing & Verification
+## 8. System Health Status LEDs & Fallback Protections
+
+During a live demo in front of hackathon judges, loose jumper wires or Bluetooth pairing timeouts can happen. EchoBand includes multi-state health monitoring and 3 layers of failsafe fallbacks:
+
+### 8.1 Multi-State Health Indicator (LED Diagnostics)
+When no alert is actively firing, the band's LEDs function as an automatic hardware health monitor:
+
+| LED Indication | System State | What It Means | Action Required |
+| :--- | :--- | :--- | :--- |
+| **Solid GREEN + Solid Onboard LED** | **HEALTHY & PAIRED** | BLE connected to phone, MPU6050 I2C responding. | Ready for full demo. |
+| **Slow Blinking ORANGE (1 Hz)** | **DEGRADED / WAITING** | BLE is waiting for connection, OR MPU6050 is offline. | Connect phone in Chrome, or check MPU wiring. |
+| **Solid RED / Rapid Blink** | **CRITICAL FAULT** | Both BLE stack and MPU6050 are offline. | Check power rails and reset ESP32. |
+
+*(Note: When an alert is received, the LEDs switch immediately to showing the alert color: Blue = Platform, Orange = Delay, Green = Departure, Red = Urgent).*
+
+### 8.2 Three-Tier Failsafe Fallbacks
+If anything goes wrong during judging, you have 3 separate fallbacks so the demo never fails:
+
+1. **Hardware Fallback (Physical Button ACK):**
+   * *Problem:* The MPU6050 accelerometer gets bumped, wire loosens, or the judge doesn't tap hard enough to trigger 2.5g.
+   * *Fallback:* Press the physical **Profile Button (`GPIO 4`)** on the band! While an alert is repeating, pressing this button **instantly confirms the alert**, stops the repetition, sends `ACK` to the phone, and blinks confirmation.
+2. **Software Fallback (Phone Screen Remote Dismiss):**
+   * *Problem:* The band is across the table, or the user cannot reach the button.
+   * *Fallback:* As soon as an alert is broadcast, a green button appears on the phone screen: **`⚡ Dismiss / Confirm on Phone (Double-Tap Fallback)`**. Tapping it remotely sends `ALERT_STOP (0)` to the band, marks the timeline `ACKNOWLEDGED`, and resets the UI.
+3. **Sensor Auto-Degradation:**
+   * *Problem:* MPU6050 completely disconnected.
+   * *Fallback:* The firmware automatically marks `mpuHealthy = false`, disables accelerometer polling (preventing I2C bus hangs), switches the status LED to Orange blink, and routes all confirmations through the physical button.
+
+---
+
+## 9. Step-by-Step Bench Testing & Verification
 
 Once uploaded, open the **Serial Monitor** in Arduino IDE at **115200 baud**.
 
@@ -301,7 +332,7 @@ You can test the entire alert and haptic sequence directly through the Serial Mo
 
 ---
 
-## 9. Troubleshooting & Emergency Fixes
+## 10. Troubleshooting & Emergency Fixes
 
 | Symptom | Probable Cause | Instant Fix |
 | :--- | :--- | :--- |

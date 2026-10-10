@@ -1,5 +1,5 @@
 // band.ino — EchoBand Wearable Armband Firmware (Single ESP32 Board Architecture)
-// BLE Peripheral (NimBLE), Non-Blocking Tactile Wave Engine, MPU6050 Double-Tap Detector
+// BLE Peripheral (NimBLE), Non-Blocking Tactile Engine, MPU6050 Double-Tap, Health Status LED, & Fallbacks
 
 #include <Wire.h>
 #include <Preferences.h>
@@ -19,10 +19,12 @@ static const uint8_t PIN_I2C_SCL     = 22;
 static const uint8_t PIN_BTN_PROFILE = 4;
 static const uint8_t PIN_BUZZER      = 26;
 
-static const uint8_t PIN_LED_BLUE    = 13; // Platform
-static const uint8_t PIN_LED_ORANGE  = 14; // Delay
-static const uint8_t PIN_LED_GREEN   = 27; // Departure
-static const uint8_t PIN_LED_RED     = 33; // Urgent / Cancel
+// Output LEDs
+static const uint8_t PIN_LED_BLUE    = 13; // Location / Platform
+static const uint8_t PIN_LED_ORANGE  = 14; // Delay / Degraded Warning
+static const uint8_t PIN_LED_GREEN   = 27; // Departure / Healthy System Status
+static const uint8_t PIN_LED_RED     = 33; // Urgent / Critical Error Status
+static const uint8_t PIN_LED_ONBOARD = 2;  // Built-in ESP32 Dev Board LED
 
 // --- Servo Configuration ---
 static const int SERVO_REST_ANGLE = 10;
@@ -41,10 +43,16 @@ static const uint32_t TAP_MIN_GAP_MS = 80;   // Min gap between taps
 static const uint32_t TAP_MAX_GAP_MS = 600;  // Max gap between taps
 static const uint32_t TAP_LOCKOUT_MS = 400;  // Lockout after confirmed double-tap
 
+// --- Health & Diagnostic State ---
+static bool mpuHealthy     = false;
+static bool bleHealthy     = false;
+static bool bleConnected   = false;
+static bool systemHealthy  = false;
+static uint32_t lastHealthLedMs = 0;
+
 // --- BLE References ---
 static NimBLEServer*         pServer     = nullptr;
 static NimBLECharacteristic* pStatusChar = nullptr;
-static bool                  bleConnected = false;
 
 // --- Profile & Persistent State ---
 static Preferences prefs;
@@ -135,6 +143,8 @@ void checkMPU6050();
 void processCommand(uint8_t type, uint8_t arg, uint8_t msgId);
 void processSerialLine(String line);
 const char* getProfileName(uint8_t p);
+void updateHealthLeds(uint32_t now);
+void triggerAcknowledge(uint8_t mId, const char* source);
 
 // --- Build Sensory Patterns ---
 void buildPattern(uint8_t type, uint8_t arg) {
@@ -159,7 +169,6 @@ void buildPattern(uint8_t type, uint8_t arg) {
   pushStep(3, false, ECHOBAND_GAP_MS);
 
   if (currentProfile == PROFILE_LANGUAGE) {
-    // Language: attention wave only
     isAlertPlaying = true;
     return;
   }
@@ -168,35 +177,35 @@ void buildPattern(uint8_t type, uint8_t arg) {
   switch (type) {
     case ALERT_PLATFORM: {
       uint8_t count = (arg >= 1 && arg <= 5) ? arg : 1;
-      appendTap(0, ECHOBAND_LONG_TAP_MS, ECHOBAND_GAP_MS, ledPin); // M1 long tap
+      appendTap(0, ECHOBAND_LONG_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       for (uint8_t i = 0; i < count; i++) {
-        appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin); // N short taps on M2
+        appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       }
       break;
     }
     case ALERT_DELAY: {
-      appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin); // M2 two short taps
+      appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       break;
     }
     case ALERT_DEPARTURE: {
-      appendTap(2, ECHOBAND_LONG_TAP_MS, ECHOBAND_GAP_MS, ledPin);  // M3 long tap
+      appendTap(2, ECHOBAND_LONG_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       break;
     }
     case ALERT_URGENT: {
-      appendTap(3, ECHOBAND_RAPID_TAP_MS, 80, ledPin);             // M4 three rapid taps
+      appendTap(3, ECHOBAND_RAPID_TAP_MS, 80, ledPin);
       appendTap(3, ECHOBAND_RAPID_TAP_MS, 80, ledPin);
       appendTap(3, ECHOBAND_RAPID_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       break;
     }
     case ALERT_CANCELLED: {
-      appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin); // M2 then M4
+      appendTap(1, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       appendTap(3, ECHOBAND_SHORT_TAP_MS, ECHOBAND_GAP_MS, ledPin);
       break;
     }
   }
 
-  // 3. Message Ended Wave (Reverse of Attention): M4 -> M3 -> M2 -> M1
+  // 3. Message Ended Wave (Reverse of Attention)
   pushStep(3, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
   pushStep(3, false, ECHOBAND_WAVE_STAGGER_MS);
   pushStep(2, true,  120, ledPin, true, currentProfile == PROFILE_BLIND);
@@ -220,7 +229,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
   }
   void onDisconnect(NimBLEServer* pServer) override {
     bleConnected = false;
-    Serial.println("[BLE] Phone disconnected");
+    Serial.println("[BLE] Phone disconnected -> Waiting for reconnect");
     NimBLEDevice::startAdvertising();
   }
 };
@@ -246,13 +255,6 @@ void setup() {
   Serial.println("  EchoBand — Wearable Haptic Band ");
   Serial.println("==================================");
 
-  // Load saved profile
-  prefs.begin("echoband", false);
-  currentProfile = prefs.getUChar("profile", PROFILE_DEAF);
-  if (currentProfile >= PROFILE_COUNT) currentProfile = PROFILE_DEAF;
-  prefs.end();
-  Serial.printf("[INIT] Active Profile: %s (%u)\n", getProfileName(currentProfile), currentProfile);
-
   // Pin initialization
   pinMode(PIN_BTN_PROFILE, INPUT_PULLUP);
   pinMode(PIN_BUZZER, OUTPUT);
@@ -260,12 +262,21 @@ void setup() {
   pinMode(PIN_LED_ORANGE, OUTPUT);
   pinMode(PIN_LED_GREEN, OUTPUT);
   pinMode(PIN_LED_RED, OUTPUT);
+  pinMode(PIN_LED_ONBOARD, OUTPUT);
 
   digitalWrite(PIN_BUZZER, LOW);
   digitalWrite(PIN_LED_BLUE, LOW);
   digitalWrite(PIN_LED_ORANGE, LOW);
   digitalWrite(PIN_LED_GREEN, LOW);
   digitalWrite(PIN_LED_RED, LOW);
+  digitalWrite(PIN_LED_ONBOARD, LOW);
+
+  // Load saved profile
+  prefs.begin("echoband", false);
+  currentProfile = prefs.getUChar("profile", PROFILE_DEAF);
+  if (currentProfile >= PROFILE_COUNT) currentProfile = PROFILE_DEAF;
+  prefs.end();
+  Serial.printf("[INIT] Active Profile: %s (%u)\n", getProfileName(currentProfile), currentProfile);
 
   // Allocate PWM timers & attach servos
   ESP32PWM::allocateTimer(0);
@@ -289,10 +300,12 @@ void setup() {
 
   // Initialize MPU6050
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
-  if (initMPU6050()) {
-    Serial.println("[OK] MPU6050 Accelerometer ready (+/- 8g)");
+  mpuHealthy = initMPU6050();
+  if (mpuHealthy) {
+    Serial.println("[OK] MPU6050 Accelerometer initialized (+/- 8g)");
   } else {
-    Serial.println("[WARN] MPU6050 not detected at 0x68 (Check SDA=21, SCL=22)");
+    Serial.println("[WARN] MPU6050 not detected at 0x68!");
+    Serial.println("  ==> Fallback enabled: Press Profile Button (GPIO 4) to ACK alerts.");
   }
 
   // Initialize NimBLE peripheral as "EchoBand"
@@ -302,15 +315,16 @@ void setup() {
   pServer->setCallbacks(new ServerCallbacks());
 
   NimBLEService* pService = pServer->createService(ECHOBAND_SERVICE_UUID);
+  bleHealthy = (pService != nullptr);
 
-  // Command Characteristic: Write / Write No Response (3 bytes: [type, arg, msgId])
+  // Command Characteristic
   NimBLECharacteristic* pCmdChar = pService->createCharacteristic(
     ECHOBAND_CHAR_COMMAND_UUID,
     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
   );
   pCmdChar->setCallbacks(new CommandCallback());
 
-  // Status Characteristic: Notify (ASCII strings: RX <msgId>, ACK <msgId>, PROFILE <name>)
+  // Status Characteristic
   pStatusChar = pService->createCharacteristic(
     ECHOBAND_CHAR_STATUS_UUID,
     NIMBLE_PROPERTY::NOTIFY
@@ -324,9 +338,13 @@ void setup() {
   pAdv->start();
   Serial.println("[OK] BLE Advertising as 'EchoBand'");
 
-  Serial.println("\nSerial test commands ready: 'A 1 2' (Platform 2), 'A 4 0' (Urgent), 'P' (Cycle Profile)");
+  systemHealthy = mpuHealthy && bleHealthy;
+  Serial.printf("[DIAGNOSTICS] Health: %s (MPU=%s, BLE=%s)\n",
+    systemHealthy ? "OPTIMAL" : "DEGRADED (FALLBACKS ACTIVE)",
+    mpuHealthy ? "OK" : "OFFLINE",
+    bleHealthy ? "OK" : "ERROR");
 
-  // Boot confirm tap on M1
+  // Initial confirmation tap on M1
   appendTap(0, 100, 50);
 }
 
@@ -341,7 +359,6 @@ void loop() {
       currentStepStartMs = now;
       currentStepDuration = step.durationMs;
 
-      // Move only one servo at a time
       if (step.servoIdx >= 0 && step.servoIdx < 4) {
         if (step.active) {
           servos[step.servoIdx]->write(SERVO_TAP_ANGLE);
@@ -380,13 +397,11 @@ void loop() {
 
   // 2. Alert Repeat Rules
   if (isRepeating && !isAlertPlaying) {
-    // 60-second safety cutoff
     if (now - alertStartMs > ECHOBAND_SAFETY_CUTOFF_MS) {
       Serial.println("[REPEAT] Safety cutoff reached (60s). Stopping repeat.");
       isRepeating = false;
     } else if (now >= nextRepeatMs) {
       if (activeType == ALERT_URGENT || currentProfile == PROFILE_DEAFBLIND) {
-        // Urgent & Deafblind repeat every 5s until ACK (capped at 6 repeats)
         if (repeatCount < ECHOBAND_MAX_REPEATS) {
           repeatCount++;
           Serial.printf("[REPEAT] Playing repeat %u / %u\n", repeatCount, ECHOBAND_MAX_REPEATS);
@@ -396,7 +411,6 @@ void loop() {
           isRepeating = false;
         }
       } else {
-        // Other alerts: one single replay after 5s if unacknowledged
         if (repeatCount < 1) {
           repeatCount++;
           Serial.println("[REPLAY] Replaying alert once after 5s unconfirmed.");
@@ -407,25 +421,36 @@ void loop() {
     }
   }
 
-  // 3. MPU6050 Accelerometer Double-Tap Check (~200 Hz = 5 ms)
-  if (now - lastMpuSampleMs >= 5) {
+  // 3. MPU6050 Accelerometer Double-Tap Check
+  if (mpuHealthy && (now - lastMpuSampleMs >= 5)) {
     lastMpuSampleMs = now;
     checkMPU6050();
   }
 
-  // 4. Profile Button Check (Debounced)
+  // 4. Profile / ACK Button Check (With Hardware Fallback!)
   bool reading = digitalRead(PIN_BTN_PROFILE);
   if (reading != lastProfileBtnState) {
     lastProfileBtnDebounce = now;
   }
   if ((now - lastProfileBtnDebounce) > 50) {
     if (reading == LOW && lastProfileBtnState == HIGH) {
-      cycleProfile();
+      if (isAlertPlaying || isRepeating) {
+        // FALLBACK: When alert is active, pressing the button ACKs the alert!
+        triggerAcknowledge(activeMsgId, "Button Fallback");
+      } else {
+        // Normal state: cycle profile
+        cycleProfile();
+      }
     }
   }
   lastProfileBtnState = reading;
 
-  // 5. USB Serial CLI Parser
+  // 5. System Health Status LED Manager (When no alert is actively firing)
+  if (!isAlertPlaying && queueCount == 0) {
+    updateHealthLeds(now);
+  }
+
+  // 6. USB Serial CLI Parser
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
@@ -441,18 +466,66 @@ void loop() {
   delay(5);
 }
 
-// --- Command Processor (BLE & Serial) ---
+// --- System Health Status LED Logic ---
+void updateHealthLeds(uint32_t now) {
+  // Update LED states every 200ms
+  if (now - lastHealthLedMs < 200) return;
+  lastHealthLedMs = now;
+
+  // Determine current health
+  systemHealthy = mpuHealthy && bleHealthy;
+
+  if (systemHealthy && bleConnected) {
+    // HEALTHY & CONNECTED: Green LED and Onboard LED stay SOLID ON
+    digitalWrite(PIN_LED_GREEN, HIGH);
+    digitalWrite(PIN_LED_ONBOARD, HIGH);
+    digitalWrite(PIN_LED_ORANGE, LOW);
+    digitalWrite(PIN_LED_RED, LOW);
+  } else if (!mpuHealthy && !bleHealthy) {
+    // CRITICAL FAULT: Red LED stays solid ON
+    digitalWrite(PIN_LED_RED, HIGH);
+    digitalWrite(PIN_LED_GREEN, LOW);
+    digitalWrite(PIN_LED_ORANGE, LOW);
+    digitalWrite(PIN_LED_ONBOARD, LOW);
+  } else {
+    // DEGRADED / WAITING: Orange LED & Onboard LED BLINK slowly (1 Hz)
+    static bool blinkState = false;
+    blinkState = !blinkState;
+    digitalWrite(PIN_LED_ORANGE, blinkState ? HIGH : LOW);
+    digitalWrite(PIN_LED_ONBOARD, blinkState ? HIGH : LOW);
+    digitalWrite(PIN_LED_GREEN, LOW);
+    digitalWrite(PIN_LED_RED, LOW);
+  }
+}
+
+// --- Trigger Acknowledgment (Sensor or Button Fallback) ---
+void triggerAcknowledge(uint8_t mId, const char* source) {
+  Serial.printf("[ACK] Alert confirmed via %s! (msgId=%u)\n", source, mId);
+  isRepeating = false;
+  clearQueue();
+
+  char ackBuf[32];
+  snprintf(ackBuf, sizeof(ackBuf), "ACK %u", mId);
+  notifyStatus(ackBuf);
+
+  // Confirmation tap on M1 + Blue LED blink
+  appendTap(0, 150, 100, PIN_LED_BLUE);
+}
+
+// --- Command Processor ---
 void processCommand(uint8_t type, uint8_t arg, uint8_t msgId) {
   if (type == ALERT_STOP) {
-    Serial.println("[CMD] STOP received. Cancelling pattern.");
+    Serial.println("[CMD] STOP received. Dismissing alert.");
     clearQueue();
     isAlertPlaying = false;
     isRepeating    = false;
     activeType     = ALERT_STOP;
+    char ackBuf[32];
+    snprintf(ackBuf, sizeof(ackBuf), "ACK %u", msgId);
+    notifyStatus(ackBuf);
     return;
   }
 
-  // Ignore repeated same msgId
   if (msgId != 0 && msgId == activeMsgId) {
     Serial.printf("[CMD] Duplicate msgId %u ignored.\n", msgId);
     return;
@@ -468,12 +541,9 @@ void processCommand(uint8_t type, uint8_t arg, uint8_t msgId) {
   char rxBuf[32];
   snprintf(rxBuf, sizeof(rxBuf), "RX %u", msgId);
   notifyStatus(rxBuf);
-  Serial.printf("[STATUS NOTIFY] %s\n", rxBuf);
 
-  // Build pattern
   buildPattern(activeType, activeArg);
 
-  // Setup repeat
   isRepeating  = true;
   nextRepeatMs = millis() + ECHOBAND_URGENT_REPEAT_MS;
 }
@@ -483,17 +553,15 @@ bool initMPU6050() {
   Wire.beginTransmission(MPU6050_ADDR);
   if (Wire.endTransmission() != 0) return false;
 
-  // Wake up sensor (PWR_MGMT_1 = 0)
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(0x6B);
   Wire.write(0x00);
-  Wire.endTransmission();
+  if (Wire.endTransmission() != 0) return false;
 
-  // Set range to +/- 8g (ACCEL_CONFIG = 0x10)
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(0x1C);
-  Wire.write(0x10);
-  Wire.endTransmission();
+  Wire.write(0x10); // +/- 8g
+  if (Wire.endTransmission() != 0) return false;
 
   return true;
 }
@@ -501,15 +569,20 @@ bool initMPU6050() {
 void checkMPU6050() {
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(0x3B);
-  if (Wire.endTransmission(false) != 0) return;
+  if (Wire.endTransmission(false) != 0) {
+    mpuHealthy = false;
+    return;
+  }
 
-  if (Wire.requestFrom((uint8_t)MPU6050_ADDR, (uint8_t)6) != 6) return;
+  if (Wire.requestFrom((uint8_t)MPU6050_ADDR, (uint8_t)6) != 6) {
+    mpuHealthy = false;
+    return;
+  }
 
   int16_t rawX = (Wire.read() << 8) | Wire.read();
   int16_t rawY = (Wire.read() << 8) | Wire.read();
   int16_t rawZ = (Wire.read() << 8) | Wire.read();
 
-  // +/- 8g scale: 4096 LSB/g
   float ax = rawX / 4096.0f;
   float ay = rawY / 4096.0f;
   float az = rawZ / 4096.0f;
@@ -526,19 +599,7 @@ void checkMPU6050() {
       if (dt >= TAP_MIN_GAP_MS && dt <= TAP_MAX_GAP_MS) {
         lastDoubleTapMs = now;
         firstTapMs = 0;
-        Serial.printf("[TAP] Double-Tap confirmed! (dt=%u ms, mag=%.2fg)\n", dt, mag);
-
-        // Acknowledge alert!
-        isRepeating = false;
-        clearQueue();
-
-        char ackBuf[32];
-        snprintf(ackBuf, sizeof(ackBuf), "ACK %u", activeMsgId);
-        notifyStatus(ackBuf);
-        Serial.printf("[STATUS NOTIFY] %s\n", ackBuf);
-
-        // Confirmation tap on M1 + blink
-        appendTap(0, 150, 100, PIN_LED_BLUE);
+        triggerAcknowledge(activeMsgId, "MPU6050 Double-Tap");
       } else if (dt > TAP_MAX_GAP_MS) {
         firstTapMs = now;
       }
@@ -564,7 +625,6 @@ void cycleProfile() {
   notifyStatus(profBuf);
 
   clearQueue();
-  // Feedback tap + blink count
   for (uint8_t i = 0; i <= currentProfile; i++) {
     appendTap(0, 80, 80, PIN_LED_GREEN);
   }
@@ -595,8 +655,10 @@ void processSerialLine(String line) {
     return;
   }
   if (line.equalsIgnoreCase("STATUS")) {
-    Serial.printf("State: activeType=%u, msgId=%u, profile=%s, ble=%s\n",
-      activeType, activeMsgId, getProfileName(currentProfile), bleConnected ? "CONNECTED" : "DISCONNECTED");
+    Serial.printf("State: activeType=%u, msgId=%u, profile=%s, ble=%s, mpu=%s\n",
+      activeType, activeMsgId, getProfileName(currentProfile),
+      bleConnected ? "CONNECTED" : "WAITING",
+      mpuHealthy ? "HEALTHY" : "OFFLINE");
     return;
   }
   if (line.startsWith("A ") || line.startsWith("a ")) {
